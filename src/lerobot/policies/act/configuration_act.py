@@ -116,7 +116,7 @@ class ACTConfig(PreTrainedConfig):
 
     # Inference.
     # Note: the value used in ACT when temporal ensembling is enabled is 0.01.
-    temporal_ensemble_coeff: float | None = True
+    temporal_ensemble_coeff: float | None = None
 
     # Training and loss computation.
     dropout: float = 0.1
