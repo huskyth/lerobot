@@ -93,7 +93,8 @@ class WandBLogger:
             # `validate()` always resolves `output_dir` on resume; None here means it was skipped.
             if self.log_dir is None:
                 raise ValueError("Resuming a WandB run requires `cfg.output_dir` to locate the previous run.")
-            wandb_run_id = get_wandb_run_id_from_filesystem(self.log_dir)
+            # TODO://为了方便，我暂时注释
+            # wandb_run_id = get_wandb_run_id_from_filesystem(self.log_dir)
         wandb.init(
             id=wandb_run_id,
             project=self.cfg.project,
@@ -122,7 +123,7 @@ class WandBLogger:
         # Handle custom step key for rl asynchronous training.
         self._wandb_custom_step_key: set[str] | None = None
         logging.info(colored("Logs will be synced with wandb.", "blue", attrs=["bold"]))
-        logging.info(f"Track this run --> {colored(wandb.run.get_url(), 'yellow', attrs=['bold'])}")
+        logging.info(f"Track this run --> {colored(wandb.run.url, 'yellow', attrs=['bold'])}")
         self._wandb = wandb
 
     def log_policy(self, checkpoint_dir: Path):
