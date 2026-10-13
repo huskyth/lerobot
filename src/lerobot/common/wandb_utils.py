@@ -130,7 +130,8 @@ class WandBLogger:
         """Checkpoints the policy to wandb."""
         if self.cfg.disable_artifact:
             return
-
+        # TODO://直接return
+        return
         step_id = checkpoint_dir.name
         artifact_name = f"{self._group}-{step_id}"
         artifact_name = get_safe_wandb_artifact_name(artifact_name)
