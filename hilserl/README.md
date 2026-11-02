@@ -30,29 +30,29 @@ WandB, and the kinematic solver.
 sudo usermod -aG dialout husky
 ```
 
-2. Adjust ports, camera paths, robot IDs, task text, and dataset name in
    `hilserl/configs/so101_leader_env.json`.
-3. Keep the follower powered off while checking `/dev/ttyACM*` and `/dev/video*`.
+   The current machine maps the stable USB aliases as:
+   - follower CH340: `usb-1a86_USB_Single_Serial_5B79015851-if00`
+   - leader CH340: `usb-1a86_USB_Single_Serial_5B8E116379-if00`
+   - top camera: `usb-2MP_USB_Camera_..._SN0002-video-index0`
+   - wrist camera: `usb-JoyandAI_JYU2C-2083_...-video-index0`
+3. Confirm the leader/follower mapping with low-speed teleoperation before HIL recording.
 4. Calibrate both arms before recording:
 
 ```bash
-lerobot-calibrate --robot.type=so101_follower --robot.port=/dev/ttyACM0 \
+lerobot-calibrate --robot.type=so101_follower \
+  --robot.port=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00 \
   --robot.id=follower_arm
 
-lerobot-calibrate --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 \
+lerobot-calibrate --teleop.type=so101_leader \
+  --teleop.port=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00 \
   --teleop.id=leader_arm
 ```
 
 5. Run teleoperation at low speed before enabling HIL-SERL:
 
 ```bash
-lerobot-teleoperate \
-  --robot.type=so101_follower \
-  --robot.port=/dev/ttyACM0 \
-  --robot.id=follower_arm \
-  --teleop.type=so101_leader \
-  --teleop.port=/dev/ttyACM1 \
-  --teleop.id=leader_arm
+lerobot-teleoperate --config_path=hilserl/configs/so101_teleop.json
 ```
 
 ## Record demonstrations

@@ -1,0 +1,38 @@
+{
+  "robot": {
+    "type": "so101_follower",
+    "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00",
+    "id": "follower_arm",
+    "use_degrees": true,
+    "disable_torque_on_disconnect": true,
+    "max_relative_target": 1.0,
+    "cameras": {
+      "top": {
+        "type": "opencv",
+        "index_or_path": "/dev/v4l/by-id/usb-2MP_USB_Camera_2MP_USB_Camera_04434000_P120800_SN0002-video-index0",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "fourcc": "YUYV"
+      },
+      "wrist": {
+        "type": "opencv",
+        "index_or_path": "/dev/v4l/by-id/usb-JoyandAI_JYU2C-2083_JYU2C-2083-2609096-video-index0",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "fourcc": "YUYV"
+      }
+    }
+  },
+  "teleop": {
+    "type": "so101_leader",
+    "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00",
+    "id": "leader_arm",
+    "use_degrees": true
+  },
+  "fps": 30,
+  "teleop_time_s": null,
+  "display_data": true,
+  "display_mode": "rerun"
+}
