@@ -15,7 +15,11 @@
 # limitations under the License.
 
 import logging
+import os
 import time
+from queue import Queue
+
+import numpy as np
 
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
 from lerobot.motors.feetech import (
@@ -23,8 +27,10 @@ from lerobot.motors.feetech import (
     OperatingMode,
 )
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
+from lerobot.utils.keyboard_input import create_key_listener
 
 from ..teleoperator import Teleoperator
+from ..utils import TeleopEvents
 from .config_so_leader import SOLeaderTeleopConfig
 
 logger = logging.getLogger(__name__)
@@ -73,9 +79,28 @@ class SOLeader(Teleoperator):
             },
             calibration=self.calibration,
         )
+        self._event_queue: Queue[str] = Queue()
+        self._event_listener = None
+        self._intervention_active = config.start_intervening
+        self._hil_kinematics = None
+        self._hil_prev_ee: np.ndarray | None = None
+        self._hil_prev_gripper: float | None = None
 
     @property
     def action_features(self) -> dict[str, type]:
+        if self.config.events_enabled and self.config.hil_action_mode == "joint":
+            motor_names = list(self.bus.motors)
+            return {
+                "dtype": "float32",
+                "shape": (len(motor_names),),
+                "names": {f"{name}.pos": i for i, name in enumerate(motor_names)},
+            }
+        if self.config.events_enabled:
+            return {
+                "dtype": "float32",
+                "shape": (4,),
+                "names": {"delta_x": 0, "delta_y": 1, "delta_z": 2, "gripper": 3},
+            }
         return {f"{motor}.pos": float for motor in self.bus.motors}
 
     @property
@@ -96,7 +121,53 @@ class SOLeader(Teleoperator):
             self.calibrate()
 
         self.configure()
+        if self.config.events_enabled:
+            if self.config.hil_action_mode == "end_effector":
+                if not self.config.hil_urdf_path:
+                    raise ValueError("hil_urdf_path is required for leader end-effector HiL mode")
+                from lerobot.model import RobotKinematics
+
+                self._hil_kinematics = RobotKinematics(
+                    self.config.hil_urdf_path,
+                    self.config.hil_target_frame_name,
+                    joint_names=[
+                        "shoulder_pan",
+                        "shoulder_lift",
+                        "elbow_flex",
+                        "wrist_flex",
+                        "wrist_roll",
+                    ],
+                )
+            self._event_listener = create_key_listener(
+                self._event_queue.put,
+                controls_help="space: toggle intervention, s: success, q: failure, r: rerecord",
+            )
         logger.info(f"{self} connected.")
+
+    def get_teleop_events(self) -> dict[TeleopEvents, bool]:
+        """Read keyboard-driven HiL-SERL events while the leader supplies joint actions."""
+        success = False
+        terminate_episode = False
+        rerecord_episode = False
+
+        while not self._event_queue.empty():
+            key = self._event_queue.get_nowait()
+            if key == "space":
+                self._intervention_active = not self._intervention_active
+            elif key == "s":
+                success = True
+            elif key == "q":
+                terminate_episode = True
+            elif key == "r":
+                terminate_episode = True
+                rerecord_episode = True
+
+        return {
+            TeleopEvents.IS_INTERVENTION: self._intervention_active,
+            TeleopEvents.TERMINATE_EPISODE: terminate_episode,
+            TeleopEvents.SUCCESS: success,
+            TeleopEvents.RERECORD_EPISODE: rerecord_episode,
+        }
 
     @property
     def is_calibrated(self) -> bool:
@@ -172,6 +243,59 @@ class SOLeader(Teleoperator):
         action = {f"{motor}.pos": val for motor, val in action.items()}
         dt_ms = (time.perf_counter() - start) * 1e3
         logger.debug(f"{self} read action: {dt_ms:.1f}ms")
+        if self.config.events_enabled and self.config.hil_action_mode == "end_effector":
+            return self._hil_delta_action(action)
+        return action
+
+    def _hil_delta_action(self, joints: dict[str, float]) -> dict[str, float]:
+        """Convert leader joint motion into the end-effector delta action used by HiL-SERL."""
+        if self._hil_kinematics is None:
+            raise RuntimeError("Leader HiL kinematics is not initialized.")
+
+        joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
+        q = np.array([joints[f"{name}.pos"] for name in joint_names], dtype=float)
+        ee = self._hil_kinematics.forward_kinematics(q)[:3, 3]
+        gripper = float(joints["gripper.pos"])
+
+        if self._hil_prev_ee is None or self._hil_prev_gripper is None:
+            self._hil_prev_ee = ee
+            self._hil_prev_gripper = gripper
+            return {"delta_x": 0.0, "delta_y": 0.0, "delta_z": 0.0, "gripper": 1.0}
+
+        delta = ee - self._hil_prev_ee
+        self._hil_prev_ee = ee
+        delta[np.abs(delta) < 1e-4] = 0.0
+
+        gripper_delta = gripper - self._hil_prev_gripper
+        self._hil_prev_gripper = gripper
+        gripper_action = 1.0
+        if gripper_delta > 1.0:
+            gripper_action = 2.0
+        elif gripper_delta < -1.0:
+            gripper_action = 0.0
+
+        action = {
+            "delta_x": float(np.clip(delta[0] / self.config.hil_step_x, -1.0, 1.0)),
+            "delta_y": float(np.clip(delta[1] / self.config.hil_step_y, -1.0, 1.0)),
+            "delta_z": float(
+                np.clip(
+                    self.config.hil_z_sign * delta[2] / self.config.hil_step_z,
+                    -1.0,
+                    1.0,
+                )
+            ),
+            "gripper": gripper_action,
+        }
+        if os.environ.get("HIL_DEBUG") and any(abs(action[axis]) > 0.01 for axis in ("delta_x", "delta_y", "delta_z")):
+            logger.warning(
+                "HiL leader delta_m=(%.5f, %.5f, %.5f) action=(%.3f, %.3f, %.3f)",
+                delta[0],
+                delta[1],
+                delta[2],
+                action["delta_x"],
+                action["delta_y"],
+                action["delta_z"],
+            )
         return action
 
     @check_if_not_connected
@@ -182,6 +306,9 @@ class SOLeader(Teleoperator):
 
     @check_if_not_connected
     def disconnect(self) -> None:
+        if self._event_listener is not None:
+            self._event_listener.stop()
+            self._event_listener = None
         self.bus.disconnect()
         logger.info(f"{self} disconnected.")
 

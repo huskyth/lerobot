@@ -130,6 +130,7 @@ class RobotEnv(gym.Env):
         display_cameras: bool = False,
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
+        joint_action: bool = False,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -158,6 +159,7 @@ class RobotEnv(gym.Env):
 
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
+        self.joint_action = joint_action
 
         self.use_gripper = use_gripper
 
@@ -203,7 +205,15 @@ class RobotEnv(gym.Env):
 
         self.observation_space = gym.spaces.Dict(observation_spaces)
 
-        # Define the action space for joint positions along with setting an intervention flag.
+        if self.joint_action:
+            self.action_space = gym.spaces.Box(
+                low=np.array([-180.0] * 5 + [0.0], dtype=np.float32),
+                high=np.array([180.0] * 5 + [100.0], dtype=np.float32),
+                dtype=np.float32,
+            )
+            return
+
+        # Define the action space for end-effector deltas plus optional gripper.
         action_dim = 3
         bounds = {}
         bounds["min"] = -np.ones(action_dim)
@@ -350,6 +360,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         use_gripper=use_gripper,
         display_cameras=display_cameras,
         reset_pose=reset_pose,
+        joint_action=cfg.processor.control_mode == "joint",
     )
 
     return env, teleop_device
@@ -489,6 +500,7 @@ def make_processors(
         InterventionActionProcessorStep(
             use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
             terminate_on_success=terminate_on_success,
+            motor_names=motor_names,
         ),
     ]
 
@@ -690,10 +702,26 @@ def control_loop(
     episode_idx = 0
     episode_step = 0
     episode_start_time = time.perf_counter()
+    num_episodes = cfg.dataset.num_episodes_to_record
+    control_time_s = (
+        cfg.env.processor.reset.control_time_s if cfg.env.processor.reset is not None else None
+    )
+
+    print("=" * 72)
+    print(f"HiL-SERL RECORDING STARTED: {num_episodes} episodes")
+    print(f"Maximum duration per episode: {control_time_s or 'unlimited'} seconds")
+    print("Main arm controls the follower. Keyboard: s=success, q=failure, r=rerecord")
+    print("=" * 72, flush=True)
 
     try:
-        while episode_idx < cfg.dataset.num_episodes_to_record:
+        while episode_idx < num_episodes:
             step_start_time = time.perf_counter()
+            if episode_step == 0:
+                print(
+                    f"\n>>> EPISODE {episode_idx + 1}/{num_episodes} STARTED <<<\n"
+                    "Move the main arm. Press s when successful, q on failure, r to rerecord.",
+                    flush=True,
+                )
 
             # Create a neutral action (no movement)
             neutral_action = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32)
@@ -746,23 +774,55 @@ def control_loop(
                 logging.info(
                     f"Episode ended after {episode_step} steps in {episode_time:.1f}s with reward {transition[TransitionKey.REWARD]}"
                 )
+                if transition[TransitionKey.INFO].get(TeleopEvents.RERECORD_EPISODE, False):
+                    status = "RERECORD"
+                elif float(transition[TransitionKey.REWARD]) > 0:
+                    status = "SUCCESS"
+                elif terminated:
+                    status = "FAILURE"
+                else:
+                    status = "TIME LIMIT"
+                print(
+                    f"\n<<< EPISODE {episode_idx + 1}/{num_episodes} ENDED: "
+                    f"{status} after {episode_time:.1f}s ({episode_step} steps) >>>",
+                    flush=True,
+                )
                 episode_step = 0
                 episode_idx += 1
 
                 if dataset is not None:
                     if transition[TransitionKey.INFO].get(TeleopEvents.RERECORD_EPISODE, False):
-                        logging.info(f"Re-recording episode {episode_idx}")
+                        print(f"Discarding and re-recording episode {episode_idx}.", flush=True)
                         dataset.clear_episode_buffer()
                         episode_idx -= 1
                     else:
-                        logging.info(f"Saving episode {episode_idx}")
+                        print(f"Saving episode {episode_idx}...", flush=True)
                         dataset.save_episode()
+                        print(
+                            f"Saved episode {episode_idx}. "
+                            f"Progress: {episode_idx}/{num_episodes}",
+                            flush=True,
+                        )
 
                 # Reset for new episode
-                transition = reset_and_build_transition(env, env_processor, action_processor)
+                if episode_idx < num_episodes:
+                    print(
+                        f"\nResetting follower for episode {episode_idx + 1}. "
+                        "Keep clear of the arm...",
+                        flush=True,
+                    )
+                    transition = reset_and_build_transition(env, env_processor, action_processor)
+                    episode_start_time = time.perf_counter()
 
             # Maintain fps timing
             precise_sleep(max(dt - (time.perf_counter() - step_start_time), 0.0))
+
+        print(
+            f"\n{'=' * 72}\n"
+            f"ALL {num_episodes} EPISODES COMPLETED. Training data saved successfully.\n"
+            f"{'=' * 72}",
+            flush=True,
+        )
     finally:
         if dataset is not None and dataset.writer is not None and dataset.writer.image_writer is not None:
             logging.info("Waiting for image writer to finish...")
@@ -806,18 +866,23 @@ def replay_trajectory(
 def main(cfg: GymManipulatorConfig) -> None:
     """Main entry point for gym manipulator script."""
     env, teleop_device = make_robot_env(cfg.env)
-    env_processor, action_processor = make_processors(env, teleop_device, cfg.env, cfg.device)
+    try:
+        env_processor, action_processor = make_processors(env, teleop_device, cfg.env, cfg.device)
 
-    print("Environment observation space:", env.observation_space)
-    print("Environment action space:", env.action_space)
-    print("Environment processor:", env_processor)
-    print("Action processor:", action_processor)
+        print("Environment observation space:", env.observation_space)
+        print("Environment action space:", env.action_space)
+        print("Environment processor:", env_processor)
+        print("Action processor:", action_processor)
 
-    if cfg.mode == "replay":
-        replay_trajectory(env, action_processor, cfg)
-        exit()
+        if cfg.mode == "replay":
+            replay_trajectory(env, action_processor, cfg)
+            return
 
-    control_loop(env, env_processor, action_processor, teleop_device, cfg)
+        control_loop(env, env_processor, action_processor, teleop_device, cfg)
+    finally:
+        env.close()
+        if teleop_device is not None and teleop_device.is_connected:
+            teleop_device.disconnect()
 
 
 if __name__ == "__main__":

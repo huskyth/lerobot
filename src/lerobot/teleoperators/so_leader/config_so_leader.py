@@ -35,6 +35,17 @@ class SOLeaderConfig:
     # happen on failure, so the steady-state read cost is unchanged.
     num_read_retries: int = 2
 
+    # HiL-SERL keyboard events. Normal leader teleoperation leaves event handling disabled.
+    events_enabled: bool = False
+    start_intervening: bool = False
+    hil_action_mode: str = "end_effector"
+    hil_urdf_path: str | None = None
+    hil_target_frame_name: str = "gripper_frame_link"
+    hil_step_x: float = 0.009
+    hil_step_y: float = 0.009
+    hil_step_z: float = 0.01
+    hil_z_sign: float = 1.0
+
 
 @TeleoperatorConfig.register_subclass("so101_leader")
 @TeleoperatorConfig.register_subclass("so100_leader")

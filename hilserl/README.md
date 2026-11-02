@@ -30,7 +30,7 @@ WandB, and the kinematic solver.
 sudo usermod -aG dialout husky
 ```
 
-   `hilserl/configs/so101_leader_env.json`.
+2. Review the hardware settings in `hilserl/configs/so101_push_cube_env.json`.
    The current machine maps the stable USB aliases as:
    - follower CH340: `usb-1a86_USB_Single_Serial_5B79015851-if00`
    - leader CH340: `usb-1a86_USB_Single_Serial_5B8E116379-if00`
@@ -57,16 +57,21 @@ lerobot-teleoperate --config_path=hilserl/configs/so101_teleop.json
 
 ## Record demonstrations
 
-Review every hardware setting first. The reset pose is intentionally unset until it has been
-validated on the physical arm.
+The HiL-SERL config uses the SO101 leader for six-joint control. The keyboard is only used for
+episode events:
+
+- `space`: toggle human intervention
+- `s`: mark success and finish the episode
+- `q`: mark failure and finish the episode
+- `r`: discard and rerecord the episode
 
 ```bash
 python -m lerobot.rl.gym_manipulator \
-  --config_path=hilserl/configs/so101_leader_env.json
+  --config_path=hilserl/configs/so101_push_cube_env.json
 ```
 
-The current robot IDs match the existing calibration files. If the calibration files are
-recreated under different IDs, update both `robot.id` and `teleop.id` in the JSON config.
+The config returns the follower to a fixed initial pose before every episode. Update that pose
+after moving the robot or changing the task.
 
 ## Software smoke test
 

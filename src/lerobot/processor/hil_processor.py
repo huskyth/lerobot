@@ -484,6 +484,7 @@ class InterventionActionProcessorStep(ProcessorStep):
 
     use_gripper: bool = False
     terminate_on_success: bool = True
+    motor_names: list[str] | None = None
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         """
@@ -518,14 +519,20 @@ class InterventionActionProcessorStep(ProcessorStep):
         # Override action if intervention is active
         if is_intervention and teleop_action is not None:
             if isinstance(teleop_action, dict):
-                # Convert teleop_action dict to tensor format
-                action_list = [
-                    teleop_action.get("delta_x", 0.0),
-                    teleop_action.get("delta_y", 0.0),
-                    teleop_action.get("delta_z", 0.0),
-                ]
-                if self.use_gripper:
-                    action_list.append(teleop_action.get(GRIPPER_KEY, 1.0))
+                joint_keys = (
+                    [f"{name}.pos" for name in self.motor_names] if self.motor_names is not None else []
+                )
+                if joint_keys and all(key in teleop_action for key in joint_keys):
+                    action_list = [teleop_action[key] for key in joint_keys]
+                else:
+                    # Convert end-effector delta teleoperation to tensor format.
+                    action_list = [
+                        teleop_action.get("delta_x", 0.0),
+                        teleop_action.get("delta_y", 0.0),
+                        teleop_action.get("delta_z", 0.0),
+                    ]
+                    if self.use_gripper:
+                        action_list.append(teleop_action.get(GRIPPER_KEY, 1.0))
             elif isinstance(teleop_action, np.ndarray):
                 action_list = teleop_action.tolist()
             else:
@@ -568,6 +575,7 @@ class InterventionActionProcessorStep(ProcessorStep):
         return {
             "use_gripper": self.use_gripper,
             "terminate_on_success": self.terminate_on_success,
+            "motor_names": self.motor_names,
         }
 
     def transform_features(

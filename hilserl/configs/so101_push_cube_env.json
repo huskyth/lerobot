@@ -1,14 +1,14 @@
 {
   "env": {
     "name": "real_robot",
-    "fps": 10,
+    "fps": 30,
     "robot": {
       "type": "so101_follower",
       "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00",
       "id": "follower_arm",
       "use_degrees": true,
       "disable_torque_on_disconnect": true,
-      "max_relative_target": 2.0,
+      "max_relative_target": null,
       "cameras": {
         "top": {
           "type": "opencv",
@@ -29,11 +29,16 @@
       }
     },
     "teleop": {
-      "type": "keyboard_ee",
-      "use_gripper": true
+      "type": "so101_leader",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00",
+      "id": "leader_arm",
+      "use_degrees": true,
+      "events_enabled": true,
+      "start_intervening": true,
+      "hil_action_mode": "joint"
     },
     "processor": {
-      "control_mode": "keyboard",
+      "control_mode": "joint",
       "max_gripper_pos": 100.0,
       "observation": {
         "add_joint_velocity_to_observation": true,
@@ -62,30 +67,10 @@
           1.7532
         ],
         "reset_time_s": 3.0,
-        "control_time_s": 20.0,
+        "control_time_s": 60.0,
         "terminate_on_success": true
       },
-      "inverse_kinematics": {
-        "urdf_path": "/home/husky/Desktop/lerobot/SO101/so101_new_calib.urdf",
-        "target_frame_name": "gripper_frame_link",
-        "end_effector_bounds": {
-          "min": [
-            0.148,
-            -0.024,
-            0.0054
-          ],
-          "max": [
-            0.2828,
-            0.062,
-            0.0493
-          ]
-        },
-        "end_effector_step_sizes": {
-          "x": 0.009,
-          "y": 0.009,
-          "z": 0.01
-        }
-      },
+      "inverse_kinematics": null,
       "reward_classifier": {
         "pretrained_path": null,
         "success_threshold": 0.5,
@@ -97,7 +82,7 @@
     "repo_id": "huskyth/so101_push_cube_hilserl",
     "root": "/home/husky/Desktop/lerobot/data/so101_push_cube_hilserl",
     "task": "push the cube forward",
-    "num_episodes_to_record": 20,
+    "num_episodes_to_record": 5,
     "replay_episode": null,
     "push_to_hub": false
   },
