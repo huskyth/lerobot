@@ -16,7 +16,7 @@
           "width": 640,
           "height": 480,
           "fps": 30,
-          "fourcc": "YUYV"
+          "fourcc": "MJPG"
         },
         "wrist": {
           "type": "opencv",
@@ -24,7 +24,7 @@
           "width": 640,
           "height": 480,
           "fps": 30,
-          "fourcc": "YUYV"
+          "fourcc": "MJPG"
         }
       }
     },

@@ -5,7 +5,7 @@
     "id": "follower_arm",
     "use_degrees": true,
     "disable_torque_on_disconnect": true,
-    "max_relative_target": 1.0,
+    "max_relative_target": null,
     "cameras": {
       "top": {
         "type": "opencv",
@@ -13,7 +13,7 @@
         "width": 640,
         "height": 480,
         "fps": 30,
-        "fourcc": "YUYV"
+        "fourcc": "MJPG"
       },
       "wrist": {
         "type": "opencv",
@@ -21,7 +21,7 @@
         "width": 640,
         "height": 480,
         "fps": 30,
-        "fourcc": "YUYV"
+        "fourcc": "MJPG"
       }
     }
   },
