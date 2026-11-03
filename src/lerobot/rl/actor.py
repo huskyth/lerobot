@@ -49,9 +49,10 @@ https://github.com/michel-aractingi/lerobot-hilserl-guide
 import logging
 import math
 import os
+import sys
 import time
 from collections.abc import Generator
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 from queue import Empty
 from typing import TYPE_CHECKING, Any
@@ -119,6 +120,30 @@ from .train_rl import TrainRLServerPipelineConfig
 # Main entry point
 
 
+@contextmanager
+def suppress_terminal_echo():
+    """Hide arrow-key escape sequences without changing Ctrl+C handling."""
+    if not sys.stdin.isatty():
+        yield
+        return
+
+    try:
+        import termios
+    except ImportError:
+        yield
+        return
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    new_settings = termios.tcgetattr(fd)
+    new_settings[3] &= ~termios.ECHO
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, new_settings)
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 @parser.wrap()
 def actor_cli(cfg: TrainRLServerPipelineConfig):
     # Fail fast with a friendly error if the optional ``hilserl`` extra is missing.
@@ -136,6 +161,9 @@ def actor_cli(cfg: TrainRLServerPipelineConfig):
 
     # Initialize logging with explicit log file
     init_logging(log_file=log_file, display_pid=display_pid)
+    logging.getLogger("lerobot.robots.so_follower.so_follower").setLevel(logging.WARNING)
+    logging.getLogger("lerobot.cameras.opencv.camera_opencv").setLevel(logging.WARNING)
+    logging.getLogger("lerobot.motors.motors_bus").setLevel(logging.WARNING)
     logging.info(f"Actor logging initialized, writing to {log_file}")
 
     is_threaded = use_threads(cfg)
@@ -195,13 +223,14 @@ def actor_cli(cfg: TrainRLServerPipelineConfig):
     receive_policy_process.start()
 
     try:
-        act_with_policy(
-            cfg=cfg,
-            shutdown_event=shutdown_event,
-            parameters_queue=parameters_queue,
-            transitions_queue=transitions_queue,
-            interactions_queue=interactions_queue,
-        )
+        with suppress_terminal_echo():
+            act_with_policy(
+                cfg=cfg,
+                shutdown_event=shutdown_event,
+                parameters_queue=parameters_queue,
+                transitions_queue=transitions_queue,
+                interactions_queue=interactions_queue,
+            )
         logging.info("[ACTOR] Policy loop finished")
     except Exception:
         logging.exception("[ACTOR] Unhandled exception in act_with_policy")
@@ -301,6 +330,7 @@ def act_with_policy(
     last_countdown_bucket = (
         math.ceil(episode_control_time_s) if episode_control_time_s is not None else None
     )
+    current_control = "POLICY"
 
     # NOTE: For the moment we will solely handle the case of a single environment
     sum_reward_episode = 0
@@ -319,7 +349,7 @@ def act_with_policy(
     print(
         f">>> ONLINE EPISODE {episode_number} STARTED | "
         f"budget={episode_control_time_s or 'unlimited'}s | "
-        "press SPACE to take over <<<",
+        "CONTROL=POLICY | press SPACE to take over <<<",
         flush=True,
     )
 
@@ -336,8 +366,8 @@ def act_with_policy(
             report_bucket = bucket if bucket <= 10 else (bucket // 10) * 10
             if report_bucket != last_countdown_bucket:
                 print(
-                    f"[EPISODE {episode_number}] Remaining control budget: "
-                    f"{remaining_s:.1f}s",
+                    f"[EPISODE {episode_number}] CONTROL={current_control} | "
+                    f"remaining={remaining_s:.1f}s",
                     flush=True,
                 )
                 last_countdown_bucket = report_bucket
@@ -399,6 +429,13 @@ def act_with_policy(
         # Check for intervention from transition info
         intervention_info = new_transition[TransitionKey.INFO]
         is_intervention = bool(intervention_info.get(TeleopEvents.IS_INTERVENTION, False))
+        new_control = "HUMAN" if is_intervention else "POLICY"
+        if new_control != current_control:
+            current_control = new_control
+            print(
+                f"[EPISODE {episode_number}] CONTROL NOW: {current_control}",
+                flush=True,
+            )
         if is_intervention:
             episode_intervention = True
             episode_intervention_steps += 1
@@ -441,7 +478,7 @@ def act_with_policy(
             print(
                 f"\n<<< ONLINE EPISODE {episode_number} ENDED: {episode_status} | "
                 f"reward={sum_reward_episode:.1f} | duration={episode_duration:.1f}s | "
-                f"intervention={intervention_rate:.1%} >>>",
+                f"intervention={intervention_rate:.1%} | CONTROL=STOPPED >>>",
                 flush=True,
             )
 
@@ -484,13 +521,14 @@ def act_with_policy(
             episode_number += 1
             episode_steps = 0
             episode_start_time = time.perf_counter()
+            current_control = "POLICY"
             last_countdown_bucket = (
                 math.ceil(episode_control_time_s) if episode_control_time_s is not None else None
             )
             print(
                 f">>> ONLINE EPISODE {episode_number} STARTED | "
                 f"budget={episode_control_time_s or 'unlimited'}s | "
-                "press SPACE to take over <<<",
+                "CONTROL=POLICY | press SPACE to take over <<<",
                 flush=True,
             )
 

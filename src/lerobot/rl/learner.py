@@ -631,18 +631,20 @@ def save_training_checkpoint(
     # NOTE: Handle the case where the dataset repo id is not specified in the config
     # eg. RL training without demonstrations data
     repo_id_buffer_save = cfg.env.task if dataset_repo_id is None else dataset_repo_id
-    replay_buffer.to_lerobot_dataset(repo_id=repo_id_buffer_save, fps=fps, root=dataset_dir)
+    try:
+        replay_buffer.to_lerobot_dataset(repo_id=repo_id_buffer_save, fps=fps, root=dataset_dir)
+    except Exception:
+        # The policy and optimizer checkpoint has already been written above.
+        # A failed auxiliary dataset export should not terminate robot training.
+        logging.exception("[LEARNER] Failed to export online replay buffer; checkpoint was preserved")
+        shutil.rmtree(dataset_dir, ignore_errors=True)
 
+    # The offline dataset is static and already available at cfg.dataset.root.
+    # Re-exporting it on every checkpoint is expensive and redundant. Keep only
+    # the online-buffer dump, which contains the evolving RL interactions needed
+    # to resume training.
     if offline_replay_buffer is not None:
-        dataset_offline_dir = os.path.join(cfg.output_dir, "dataset_offline")
-        if os.path.exists(dataset_offline_dir) and os.path.isdir(dataset_offline_dir):
-            shutil.rmtree(dataset_offline_dir)
-
-        offline_replay_buffer.to_lerobot_dataset(
-            cfg.dataset.repo_id,
-            fps=fps,
-            root=dataset_offline_dir,
-        )
+        logging.info("[LEARNER] Skipping redundant offline replay-buffer export; using cfg.dataset.root")
 
     logging.info("Resume training")
 
@@ -849,16 +851,11 @@ def initialize_offline_replay_buffer(
     Returns:
         ReplayBuffer: Initialized offline replay buffer
     """
-    if not cfg.resume:
-        logging.info("make_dataset offline buffer")
-        offline_dataset = make_dataset(cfg)
-    else:
-        logging.info("load offline dataset")
-        dataset_offline_path = os.path.join(cfg.output_dir, "dataset_offline")
-        offline_dataset = LeRobotDataset(
-            repo_id=cfg.dataset.repo_id,
-            root=dataset_offline_path,
-        )
+    # The offline buffer is sourced from immutable demonstrations. Loading it
+    # from cfg.dataset directly also keeps resume independent of checkpoint-time
+    # dataset_offline exports.
+    logging.info("make_dataset offline buffer from configured source dataset")
+    offline_dataset = make_dataset(cfg)
 
     logging.info("Convert to a offline replay buffer")
     offline_replay_buffer = ReplayBuffer.from_lerobot_dataset(

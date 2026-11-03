@@ -414,9 +414,10 @@ class GripperVelocityToJoint(RobotActionProcessorStep):
 
         if self.discrete_gripper:
             # Map discrete command {0=close, 1=stay, 2=open} -> signed velocity.
-            # Negation accounts for SO100 sign (joint position increases on close).
-            #   0 -> +clip_max (close), 1 -> 0 (stay), 2 -> -clip_max (open)
-            gripper_vel = -(gripper_vel - 1) * self.clip_max
+            # On the calibrated SO follower, the normalized gripper position
+            # increases as the jaws open (0=closed, 100=open).
+            #   0 -> -clip_max (close), 1 -> 0 (stay), 2 -> +clip_max (open)
+            gripper_vel = (gripper_vel - 1) * self.clip_max
 
         # Compute desired gripper position
         delta = gripper_vel * float(self.speed_factor)
