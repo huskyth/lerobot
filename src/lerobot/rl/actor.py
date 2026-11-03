@@ -47,9 +47,11 @@ https://github.com/michel-aractingi/lerobot-hilserl-guide
 """
 
 import logging
+import math
 import os
 import time
 from collections.abc import Generator
+from contextlib import nullcontext
 from functools import lru_cache
 from queue import Empty
 from typing import TYPE_CHECKING, Any
@@ -88,7 +90,7 @@ from lerobot.configs import parser
 from lerobot.policies import make_policy, make_pre_post_processors
 from lerobot.processor import TransitionKey
 from lerobot.robots import so_follower  # noqa: F401
-from lerobot.teleoperators import gamepad, so_leader  # noqa: F401
+from lerobot.teleoperators import gamepad, keyboard, so_leader  # noqa: F401
 from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.device_utils import get_safe_torch_device
 from lerobot.utils.process import ProcessSignalHandler, ensure_multiprocessing_start_method
@@ -287,6 +289,18 @@ def act_with_policy(
     )
 
     transition = reset_and_build_transition(online_env, env_processor, action_processor)
+    episode_number = 1
+    episode_steps = 0
+    episode_start_time = time.perf_counter()
+    episode_control_time_s = (
+        cfg.env.processor.reset.control_time_s if cfg.env.processor.reset is not None else None
+    )
+    episode_max_steps = (
+        int(episode_control_time_s * cfg.env.fps) if episode_control_time_s is not None else None
+    )
+    last_countdown_bucket = (
+        math.ceil(episode_control_time_s) if episode_control_time_s is not None else None
+    )
 
     # NOTE: For the moment we will solely handle the case of a single environment
     sum_reward_episode = 0
@@ -298,18 +312,48 @@ def act_with_policy(
 
     policy_timer = TimerManager("Policy inference", log=False)
 
+    print("=" * 72, flush=True)
+    print("ONLINE HiL-SERL TRAINING", flush=True)
+    print("Policy controls by default. Press SPACE to toggle human takeover.", flush=True)
+    print("Keyboard logs will explicitly show intervention ON or OFF.", flush=True)
+    print(
+        f">>> ONLINE EPISODE {episode_number} STARTED | "
+        f"budget={episode_control_time_s or 'unlimited'}s | "
+        "press SPACE to take over <<<",
+        flush=True,
+    )
+
     for interaction_step in range(cfg.policy.online_steps):
         start_time = time.perf_counter()
         if shutdown_event.is_set():
             logging.info("[ACTOR] Shutting down act_with_policy")
             return
 
+        episode_steps += 1
+        if episode_control_time_s is not None and episode_max_steps is not None:
+            remaining_s = max(episode_max_steps - episode_steps, 0) / cfg.env.fps
+            bucket = math.ceil(remaining_s)
+            report_bucket = bucket if bucket <= 10 else (bucket // 10) * 10
+            if report_bucket != last_countdown_bucket:
+                print(
+                    f"[EPISODE {episode_number}] Remaining control budget: "
+                    f"{remaining_s:.1f}s",
+                    flush=True,
+                )
+                last_countdown_bucket = report_bucket
+
         observation = {
             k: v for k, v in transition[TransitionKey.OBSERVATION].items() if k in cfg.policy.input_features
         }
 
+        autocast_context = (
+            torch.autocast(device_type="cuda")
+            if cfg.policy.use_amp and device.type == "cuda"
+            else nullcontext()
+        )
+
         # Time policy inference and check if it meets FPS requirement
-        with policy_timer:
+        with policy_timer, autocast_context:
             normalized_observation = preprocessor.process_observation(observation)
             action = policy.select_action(batch=normalized_observation)
             # Unnormalize only the continuous part.
@@ -384,6 +428,23 @@ def act_with_policy(
         if done or truncated:
             logging.info(f"[ACTOR] Global step {interaction_step}: Episode reward: {sum_reward_episode}")
 
+            if float(reward) > 0:
+                episode_status = "SUCCESS"
+            elif truncated:
+                episode_status = "TIME LIMIT"
+            else:
+                episode_status = "FAILURE"
+            intervention_rate = (
+                episode_intervention_steps / episode_total_steps if episode_total_steps else 0.0
+            )
+            episode_duration = time.perf_counter() - episode_start_time
+            print(
+                f"\n<<< ONLINE EPISODE {episode_number} ENDED: {episode_status} | "
+                f"reward={sum_reward_episode:.1f} | duration={episode_duration:.1f}s | "
+                f"intervention={intervention_rate:.1%} >>>",
+                flush=True,
+            )
+
             update_policy_parameters(algorithm=algorithm, parameters_queue=parameters_queue, device=device)
 
             if len(list_transition_to_send_to_learner) > 0:
@@ -395,11 +456,6 @@ def act_with_policy(
 
             stats = get_frequency_stats(policy_timer)
             policy_timer.reset()
-
-            # Calculate intervention rate
-            intervention_rate = 0.0
-            if episode_total_steps > 0:
-                intervention_rate = episode_intervention_steps / episode_total_steps
 
             # Send episodic reward to the learner
             interactions_queue.put(
@@ -420,7 +476,23 @@ def act_with_policy(
             episode_intervention_steps = 0
             episode_total_steps = 0
 
+            print(
+                "Robot is resetting now. DO NOT command the robot until the next episode starts.",
+                flush=True,
+            )
             transition = reset_and_build_transition(online_env, env_processor, action_processor)
+            episode_number += 1
+            episode_steps = 0
+            episode_start_time = time.perf_counter()
+            last_countdown_bucket = (
+                math.ceil(episode_control_time_s) if episode_control_time_s is not None else None
+            )
+            print(
+                f">>> ONLINE EPISODE {episode_number} STARTED | "
+                f"budget={episode_control_time_s or 'unlimited'}s | "
+                "press SPACE to take over <<<",
+                flush=True,
+            )
 
         if cfg.env.fps is not None:
             dt_time = time.perf_counter() - start_time

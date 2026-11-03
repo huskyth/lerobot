@@ -251,7 +251,13 @@ class RobotEnv(gym.Env):
             reset_follower_position(self.robot, np.array(self.reset_pose))
             log_say("Reset the environment done.", play_sounds=True)
 
-        precise_sleep(max(self.reset_time_s - (time.perf_counter() - start_time), 0.0))
+        remaining_reset_time = max(self.reset_time_s - (time.perf_counter() - start_time), 0.0)
+        print(
+            f"RESET WINDOW: place the object now. "
+            f"Next episode starts in up to {remaining_reset_time:.1f}s.",
+            flush=True,
+        )
+        precise_sleep(remaining_reset_time)
 
         super().reset(seed=seed, options=options)
 
@@ -521,6 +527,7 @@ def make_processors(
             ),
             EEBoundsAndSafety(
                 end_effector_bounds=cfg.processor.inverse_kinematics.end_effector_bounds,
+                raise_on_jump=False,
             ),
             GripperVelocityToJoint(
                 clip_max=cfg.processor.max_gripper_pos,

@@ -32,6 +32,8 @@ from .configuration_keyboard import (
     KeyboardTeleopConfig,
 )
 
+logger = logging.getLogger(__name__)
+
 PYNPUT_AVAILABLE = _pynput_available
 if TYPE_CHECKING:
     from pynput import keyboard
@@ -161,6 +163,7 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
         super().__init__(config)
         self.config = config
         self.misc_keys_queue: Queue[str | keyboard.Key | None] = Queue()
+        self._intervention_active = False
 
     @property
     def action_features(self) -> dict:
@@ -235,6 +238,7 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
         episode termination, success indicators, etc.
 
         Keyboard mappings:
+        - Space toggles persistent human intervention
         - Any movement keys pressed = intervention active
         - 's' key = success (terminate episode successfully)
         - 'r' key = rerecord episode (terminate and rerecord)
@@ -270,7 +274,9 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
             "[",
             "]",
         ]
-        is_intervention = any(self.current_pressed.get(key, False) for key in movement_keys)
+        is_intervention = self._intervention_active or any(
+            self.current_pressed.get(key, False) for key in movement_keys
+        )
 
         self.current_pressed.clear()
 
@@ -282,14 +288,24 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
         # Process any pending misc keys
         while not self.misc_keys_queue.empty():
             key = self.misc_keys_queue.get_nowait()
-            if key == "s":
+            if key == "space" or key == keyboard.Key.space:
+                self._intervention_active = not self._intervention_active
+                is_intervention = self._intervention_active
+                logger.info(
+                    "Keyboard human intervention: %s",
+                    "ON" if self._intervention_active else "OFF",
+                )
+            elif key == "s":
                 success = True
+                logger.info("Keyboard event: SUCCESS (s)")
             elif key == "r":
                 terminate_episode = True
                 rerecord_episode = True
+                logger.info("Keyboard event: RERECORD (r)")
             elif key == "q":
                 terminate_episode = True
                 success = False
+                logger.info("Keyboard event: FAILURE (q)")
 
         return {
             TeleopEvents.IS_INTERVENTION: is_intervention,
