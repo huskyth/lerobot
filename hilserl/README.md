@@ -65,6 +65,13 @@ episode events:
 - `q`: mark failure and finish the episode
 - `r`: discard and rerecord the episode
 
+When the official keyboard end-effector mode is selected, controls are:
+
+- `up` / `down`: move forward and backward along x
+- `left` / `right`: move along y
+- `PageUp` / `PageDown`: move vertically along z
+- `[` / `]`: close and open the gripper
+
 ```bash
 python -m lerobot.rl.gym_manipulator \
   --config_path=hilserl/configs/so101_push_cube_env.json

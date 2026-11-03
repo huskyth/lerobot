@@ -188,17 +188,25 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
         # Generate action based on current key states
         for key, val in self.current_pressed.items():
             if key == keyboard.Key.up:
-                delta_y = -int(val)
-            elif key == keyboard.Key.down:
-                delta_y = int(val)
-            elif key == keyboard.Key.left:
                 delta_x = int(val)
-            elif key == keyboard.Key.right:
+            elif key == keyboard.Key.down:
                 delta_x = -int(val)
-            elif key == keyboard.Key.shift:
-                delta_z = -int(val)
-            elif key == keyboard.Key.shift_r:
+            elif key == keyboard.Key.left:
+                delta_y = int(val)
+            elif key == keyboard.Key.right:
+                delta_y = -int(val)
+            elif key == keyboard.Key.page_up:
                 delta_z = int(val)
+            elif key == keyboard.Key.page_down:
+                delta_z = -int(val)
+            elif key == keyboard.Key.shift:
+                delta_z -= int(val)
+            elif key == keyboard.Key.shift_r:
+                delta_z += int(val)
+            elif key == "]":
+                gripper_action = int(val) + 1
+            elif key == "[":
+                gripper_action = 1 - int(val)
             elif key == keyboard.Key.ctrl_r:
                 # Gripper actions are expected to be between 0 (close), 1 (stay), 2 (open)
                 gripper_action = int(val) + 1
@@ -253,10 +261,14 @@ class KeyboardEndEffectorTeleop(KeyboardTeleop):
             keyboard.Key.down,
             keyboard.Key.left,
             keyboard.Key.right,
+            keyboard.Key.page_up,
+            keyboard.Key.page_down,
             keyboard.Key.shift,
             keyboard.Key.shift_r,
             keyboard.Key.ctrl_r,
             keyboard.Key.ctrl_l,
+            "[",
+            "]",
         ]
         is_intervention = any(self.current_pressed.get(key, False) for key in movement_keys)
 
