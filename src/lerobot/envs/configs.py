@@ -251,6 +251,18 @@ class RewardClassifierConfig:
 
 
 @dataclass
+class PushProgressRewardConfig:
+    """Configuration for a visual progress reward in a fixed-camera pushing task."""
+
+    camera_key: str = "observation.images.top"
+    target_roi: tuple[int, int, int, int] = (62, 42, 78, 94)
+    success_threshold: float = 8.0
+    progress_reward: float = 0.5
+    success_reward: float = 1.0
+    terminate_on_success: bool = True
+
+
+@dataclass
 class InverseKinematicsConfig:
     """Configuration for inverse kinematics processing."""
 
@@ -299,6 +311,7 @@ class HILSerlProcessorConfig:
     reset: ResetConfig | None = None
     inverse_kinematics: InverseKinematicsConfig | None = None
     reward_classifier: RewardClassifierConfig | None = None
+    push_progress_reward: PushProgressRewardConfig | None = None
     max_gripper_pos: float | None = 100.0
 
 

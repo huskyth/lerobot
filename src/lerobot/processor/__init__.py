@@ -63,6 +63,7 @@ from .hil_processor import (
     GymHILAdapterProcessorStep,
     ImageCropResizeProcessorStep,
     InterventionActionProcessorStep,
+    PushProgressRewardProcessorStep,
     RewardClassifierProcessorStep,
     TimeLimitProcessorStep,
 )
@@ -131,6 +132,7 @@ __all__ = [
     "ImageCropResizeProcessorStep",
     "InfoProcessorStep",
     "InterventionActionProcessorStep",
+    "PushProgressRewardProcessorStep",
     "DefaultPolicyProcessorSteps",
     "load_pretrained_policy_processors",
     "make_default_policy_processor_steps",

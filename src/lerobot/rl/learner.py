@@ -658,9 +658,8 @@ def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipeli
 
     If resume is True:
     - Verifies that a checkpoint exists
-    - Loads the checkpoint configuration
-    - Logs resumption details
-    - Returns the checkpoint configuration
+    - Keeps the current configuration as the source of runtime settings
+    - Returns the current configuration so the checkpoint only restores state
 
     If resume is False:
     - Checks if an output directory exists (to prevent accidental overwriting)
@@ -694,19 +693,22 @@ def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipeli
     # Log that we found a valid checkpoint and are resuming
     logging.info(
         colored(
-            "Valid checkpoint found: resume=True detected, resuming previous run",
+            "Valid checkpoint found: resuming with current configuration and checkpoint state",
             color="yellow",
             attrs=["bold"],
         )
     )
 
-    # Load config using Draccus
+    # The checkpoint supplies model, optimizer, replay-buffer and step state.
+    # Runtime settings come from the current config so edits made before a resume
+    # (for example policy noise limits) take effect instead of being silently
+    # replaced by the values captured when the checkpoint was created.
     checkpoint_cfg_path = os.path.join(checkpoint_dir, PRETRAINED_MODEL_DIR, "train_config.json")
-    checkpoint_cfg = TrainRLServerPipelineConfig.from_pretrained(checkpoint_cfg_path)
+    if not os.path.isfile(checkpoint_cfg_path):
+        raise RuntimeError(f"No checkpoint configuration found at {checkpoint_cfg_path} for resume=True")
 
-    # Ensure resume flag is set in returned config
-    checkpoint_cfg.resume = True
-    return checkpoint_cfg
+    cfg.resume = True
+    return cfg
 
 
 def load_training_state(

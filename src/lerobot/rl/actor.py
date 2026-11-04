@@ -465,7 +465,12 @@ def act_with_policy(
         if done or truncated:
             logging.info(f"[ACTOR] Global step {interaction_step}: Episode reward: {sum_reward_episode}")
 
-            if float(reward) > 0:
+            episode_info = new_transition[TransitionKey.INFO]
+            episode_success = bool(episode_info.get(TeleopEvents.SUCCESS, False))
+            if "push_progress_success" not in episode_info and float(reward) > 0:
+                episode_success = True
+
+            if episode_success:
                 episode_status = "SUCCESS"
             elif truncated:
                 episode_status = "TIME LIMIT"

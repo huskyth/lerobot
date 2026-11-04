@@ -70,20 +70,20 @@
         "target_frame_name": "gripper_frame_link",
         "end_effector_bounds": {
           "min": [
-            0.1371,
-            -0.0764,
-            0.02
+            0.13,
+            -0.065,
+            0.03
           ],
           "max": [
-            0.3684,
-            0.1557,
-            0.1169
+            0.33,
+            0.155,
+            0.08
           ]
         },
         "end_effector_step_sizes": {
           "x": 0.009,
           "y": 0.009,
-          "z": 0.01
+          "z": 0.005
         }
       },
       "reward_classifier": {
@@ -94,10 +94,10 @@
     }
   },
   "dataset": {
-    "repo_id": "huskyth/so101_push_cube_hilserl",
-    "root": "/home/husky/Desktop/lerobot/data/so101_push_cube_hilserl",
+    "repo_id": "huskyth/so101_push_cube_hilserl_v5",
+    "root": "/home/husky/Desktop/lerobot/data/so101_push_cube_hilserl_v5",
     "task": "push the cube forward",
-    "num_episodes_to_record": 5,
+    "num_episodes_to_record": 15,
     "replay_episode": null,
     "push_to_hub": false
   },

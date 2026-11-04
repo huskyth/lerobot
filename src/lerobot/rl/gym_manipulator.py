@@ -42,6 +42,7 @@ from lerobot.processor import (
     MapDeltaActionToRobotActionStep,
     MapTensorToDeltaActionDictStep,
     Numpy2TorchActionProcessorStep,
+    PushProgressRewardProcessorStep,
     RewardClassifierProcessorStep,
     RobotActionToPolicyActionProcessorStep,
     RobotObservation,
@@ -494,6 +495,19 @@ def make_processors(
                 success_threshold=cfg.processor.reward_classifier.success_threshold,
                 success_reward=cfg.processor.reward_classifier.success_reward,
                 terminate_on_success=terminate_on_success,
+            )
+        )
+
+    if cfg.processor.push_progress_reward is not None:
+        progress_cfg = cfg.processor.push_progress_reward
+        env_pipeline_steps.append(
+            PushProgressRewardProcessorStep(
+                camera_key=progress_cfg.camera_key,
+                target_roi=progress_cfg.target_roi,
+                success_threshold=progress_cfg.success_threshold,
+                progress_reward=progress_cfg.progress_reward,
+                success_reward=progress_cfg.success_reward,
+                terminate_on_success=progress_cfg.terminate_on_success,
             )
         )
 

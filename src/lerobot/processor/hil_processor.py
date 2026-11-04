@@ -16,7 +16,7 @@
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import numpy as np
@@ -680,6 +680,114 @@ class RewardClassifierProcessorStep(ProcessorStep):
         return {
             "device": self.device,
             "success_threshold": self.success_threshold,
+            "success_reward": self.success_reward,
+            "terminate_on_success": self.terminate_on_success,
+        }
+
+    def transform_features(
+        self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
+    ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
+        return features
+
+
+@ProcessorStepRegistry.register("push_progress_reward")
+@dataclass
+class PushProgressRewardProcessorStep(ProcessorStep):
+    """Rewards new visual progress toward a fixed target region.
+
+    The reward compares the current camera image with the first frame after reset.
+    A monotonic best-progress value prevents an agent from collecting reward by
+    repeatedly moving into and out of the target region.
+    """
+
+    camera_key: str = "observation.images.top"
+    target_roi: tuple[int, int, int, int] = (62, 42, 78, 94)
+    success_threshold: float = 8.0
+    progress_reward: float = 0.5
+    success_reward: float = 1.0
+    terminate_on_success: bool = True
+    _baseline_roi: np.ndarray | None = field(default=None, init=False, repr=False)
+    _best_progress: float = field(default=0.0, init=False, repr=False)
+
+    def reset(self) -> None:
+        self._baseline_roi = None
+        self._best_progress = 0.0
+
+    @staticmethod
+    def _to_grayscale(image: torch.Tensor | np.ndarray) -> np.ndarray:
+        array = image.detach().cpu().float().numpy() if isinstance(image, torch.Tensor) else np.asarray(image)
+        array = np.asarray(array, dtype=np.float32)
+
+        if array.ndim == 3 and array.shape[0] in (1, 3, 4):
+            array = np.moveaxis(array, 0, -1)
+        if array.ndim == 3:
+            if array.shape[-1] == 1:
+                array = array[..., 0]
+            elif array.shape[-1] >= 3:
+                array = (
+                    0.299 * array[..., 0]
+                    + 0.587 * array[..., 1]
+                    + 0.114 * array[..., 2]
+                )
+        if array.ndim != 2:
+            raise ValueError(f"Expected a 2D or channel-first/last image, got shape {array.shape}")
+        if array.size and float(array.max()) <= 1.0:
+            array = array * 255.0
+        return array
+
+    def _crop_roi(self, grayscale: np.ndarray) -> np.ndarray:
+        x0, y0, x1, y1 = self.target_roi
+        height, width = grayscale.shape
+        if not (0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height):
+            raise ValueError(
+                f"target_roi={self.target_roi} is outside image shape {(height, width)}"
+            )
+        return grayscale[y0:y1, x0:x1]
+
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        observation = transition.get(TransitionKey.OBSERVATION) or {}
+        if self.camera_key not in observation:
+            raise ValueError(
+                f"PushProgressRewardProcessorStep expected camera '{self.camera_key}' "
+                f"but received {sorted(observation)}"
+            )
+
+        current_roi = self._crop_roi(self._to_grayscale(observation[self.camera_key]))
+        if self._baseline_roi is None:
+            self._baseline_roi = current_roi.copy()
+            return transition
+
+        change = float(np.mean(np.abs(current_roi - self._baseline_roi)))
+        progress = float(np.clip(change / self.success_threshold, 0.0, 1.0))
+        improvement = max(progress - self._best_progress, 0.0)
+        self._best_progress = max(self._best_progress, progress)
+
+        new_transition = transition.copy()
+        reward = float(new_transition.get(TransitionKey.REWARD, 0.0))
+        reward += self.progress_reward * improvement
+        info = new_transition.get(TransitionKey.INFO)
+        if info is None:
+            info = {}
+        success = progress >= 1.0 or bool(_get_event(info, TeleopEvents.SUCCESS, False))
+        if success:
+            reward += self.success_reward
+            if self.terminate_on_success:
+                new_transition[TransitionKey.DONE] = True
+
+        new_transition[TransitionKey.REWARD] = reward
+        _set_event(info, TeleopEvents.SUCCESS, success)
+        info["push_progress"] = progress
+        info["push_progress_change"] = change
+        info["push_progress_success"] = success
+        new_transition[TransitionKey.INFO] = info
+        return new_transition
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "camera_key": self.camera_key,
+            "target_roi": self.target_roi,
+            "success_threshold": self.success_threshold,
+            "progress_reward": self.progress_reward,
             "success_reward": self.success_reward,
             "terminate_on_success": self.terminate_on_success,
         }
