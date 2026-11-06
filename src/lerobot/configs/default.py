@@ -91,6 +91,22 @@ class WandBConfig:
 
 
 @dataclass
+class SwanLabConfig:
+    enable: bool = False
+    project: str = "lerobot"
+    workspace: str | None = None
+    experiment_name: str | None = None
+    description: str | None = None
+    tags: list[str] = field(default_factory=list)
+    mode: str = "online"
+    host: str | None = None
+    api_key_env: str = "SWANLAB_API_KEY"
+    public: bool = False
+    run_id: str | None = None
+    resume: str | None = None
+
+
+@dataclass
 class EvalConfig:
     n_episodes: int = 50
     # `batch_size` specifies the number of environments to use in a gym.vector.VectorEnv.

@@ -1,0 +1,9 @@
+__pycache__/
+camera_probe/
+current_pose.json
+
+# Root repository ignores URDF/STL assets globally; these files are required
+# by the SO101 experiment configuration and are intentionally versioned.
+!assets/
+!assets/**/*.urdf
+!assets/**/*.stl

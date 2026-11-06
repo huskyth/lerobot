@@ -39,6 +39,7 @@ from lerobot.processor import (
     GymHILAdapterProcessorStep,
     ImageCropResizeProcessorStep,
     InterventionActionProcessorStep,
+    LeaderFollowerProcessor,
     MapDeltaActionToRobotActionStep,
     MapTensorToDeltaActionDictStep,
     Numpy2TorchActionProcessorStep,
@@ -71,6 +72,7 @@ from lerobot.teleoperators import (
     make_teleoperator_from_config,
     so_leader,  # noqa: F401
 )
+from lerobot.teleoperators.so_leader.so_leader_follower import SO101LeaderFollower
 from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
@@ -107,6 +109,7 @@ class GymManipulatorConfig:
 
 def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> None:
     """Reset robot arm to target position using smooth trajectory."""
+    print("[RESET] Moving follower to the configured reset pose. Keep hands clear.", flush=True)
     current_position_dict = robot_arm.bus.sync_read("Present_Position")
     current_position = np.array(
         [current_position_dict[name] for name in current_position_dict], dtype=np.float32
@@ -118,6 +121,7 @@ def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> No
         action_dict = dict(zip(current_position_dict, pose, strict=False))
         robot_arm.bus.sync_write("Goal_Position", action_dict)
         precise_sleep(0.015)
+    print("[RESET] Follower motion complete. Settling at the reset pose.", flush=True)
 
 
 class RobotEnv(gym.Env):
@@ -129,6 +133,7 @@ class RobotEnv(gym.Env):
         use_gripper: bool = False,
         display_cameras: bool = False,
         reset_pose: list[float] | None = None,
+        pre_reset_delay_s: float = 2.0,
         reset_time_s: float = 5.0,
     ) -> None:
         """Initialize robot environment with configuration options.
@@ -144,6 +149,33 @@ class RobotEnv(gym.Env):
 
         self.robot = robot
         self.display_cameras = display_cameras
+        self._rerun = None
+        if self.display_cameras:
+            try:
+                import rerun as rr
+
+                rr.init("so101_hilserl", spawn=True)
+                rr.send_blueprint(
+                    rr.blueprint.Blueprint(
+                        rr.blueprint.Horizontal(
+                            rr.blueprint.Spatial2DView(origin="cameras/top", name="TOP"),
+                            rr.blueprint.Spatial2DView(origin="cameras/wrist", name="WRIST"),
+                        )
+                    )
+                )
+                self._rerun = rr
+                print("[DISPLAY] Opened live Rerun camera viewer.", flush=True)
+            except ImportError:
+                print(
+                    "[DISPLAY] rerun-sdk is unavailable; live camera display is disabled.",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(
+                    f"[DISPLAY] Could not open the Rerun viewer: {exc}. "
+                    "Camera recording will continue without the live window.",
+                    flush=True,
+                )
 
         # Connect to the robot if not already connected.
         if not self.robot.is_connected:
@@ -157,6 +189,7 @@ class RobotEnv(gym.Env):
         self._image_keys = self.robot.cameras.keys()
 
         self.reset_pose = reset_pose
+        self.pre_reset_delay_s = pre_reset_delay_s
         self.reset_time_s = reset_time_s
 
         self.use_gripper = use_gripper
@@ -235,13 +268,24 @@ class RobotEnv(gym.Env):
         """
         # Reset the robot
         # self.robot.reset()
-        start_time = time.perf_counter()
         if self.reset_pose is not None:
             log_say("Reset the environment.", play_sounds=True)
+            if self.pre_reset_delay_s > 0:
+                print(
+                    f"[RESET] Starting automatic reset in {self.pre_reset_delay_s:.1f}s.",
+                    flush=True,
+                )
+                precise_sleep(self.pre_reset_delay_s)
             reset_follower_position(self.robot, np.array(self.reset_pose))
             log_say("Reset the environment done.", play_sounds=True)
 
-        precise_sleep(max(self.reset_time_s - (time.perf_counter() - start_time), 0.0))
+        precise_sleep(self.reset_time_s)
+        if self.display_cameras:
+            self.render()
+        print(
+            "[READY] Robot is at the reset pose. Place the cube, then press Space to take over.",
+            flush=True,
+        )
 
         super().reset(seed=seed, options=options)
 
@@ -281,15 +325,36 @@ class RobotEnv(gym.Env):
 
     def render(self) -> None:
         """Display robot camera feeds."""
+        current_observation = self._get_observation()
+        if current_observation is None:
+            return
+        image_items = [
+            (key, value)
+            for key, value in current_observation.items()
+            if key in self._image_keys
+        ]
+        if self._rerun is not None:
+            self._rerun.set_time("frame", sequence=self.current_step)
+            for key, image in image_items:
+                if isinstance(image, torch.Tensor):
+                    image = image.detach().cpu().numpy()
+                image = np.asarray(image)
+                if image.ndim == 3 and image.shape[0] in (1, 3, 4) and image.shape[-1] not in (1, 3, 4):
+                    image = np.transpose(image, (1, 2, 0))
+                if np.issubdtype(image.dtype, np.floating):
+                    image = np.clip(image * 255.0, 0, 255).astype(np.uint8)
+                self._rerun.log(f"cameras/{key}", self._rerun.Image(image))
+                if self.current_step == 0:
+                    print(f"[DISPLAY] First frame {key}: shape={image.shape}", flush=True)
+            return
+
         import cv2
 
-        current_observation = self._get_observation()
-        if current_observation is not None:
-            image_keys = [key for key in current_observation if "image" in key]
-
-            for key in image_keys:
-                cv2.imshow(key, cv2.cvtColor(current_observation[key].numpy(), cv2.COLOR_RGB2BGR))
-                cv2.waitKey(1)
+        for key, image in image_items:
+            if isinstance(image, torch.Tensor):
+                image = image.detach().cpu().numpy()
+            cv2.imshow(key, cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
 
     def close(self) -> None:
         """Close environment and disconnect robot."""
@@ -344,12 +409,18 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         cfg.processor.observation.display_cameras if cfg.processor.observation is not None else False
     )
     reset_pose = cfg.processor.reset.fixed_reset_joint_positions if cfg.processor.reset is not None else None
+    pre_reset_delay_s = (
+        cfg.processor.reset.pre_reset_delay_s if cfg.processor.reset is not None else 2.0
+    )
+    reset_time_s = cfg.processor.reset.reset_time_s if cfg.processor.reset is not None else 5.0
 
     env = RobotEnv(
         robot=robot,
         use_gripper=use_gripper,
         display_cameras=display_cameras,
         reset_pose=reset_pose,
+        pre_reset_delay_s=pre_reset_delay_s,
+        reset_time_s=reset_time_s,
     )
 
     return env, teleop_device
@@ -486,11 +557,39 @@ def make_processors(
     action_pipeline_steps = [
         AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
         AddTeleopEventsAsInfoStep(teleop_device=teleop_device),
+    ]
+    if cfg.processor.control_mode == "leader":
+        if kinematics_solver is None:
+            raise ValueError("Leader control mode requires inverse_kinematics configuration.")
+        if not isinstance(teleop_device, SO101LeaderFollower):
+            raise ValueError("Leader control mode requires teleop.leader_follower_mode=true.")
+        action_pipeline_steps.append(
+            LeaderFollowerProcessor(
+                leader_device=teleop_device,
+                motor_names=motor_names,
+                kinematics=kinematics_solver,
+                end_effector_step_sizes=np.array(
+                    [
+                        cfg.processor.inverse_kinematics.end_effector_step_sizes["x"],
+                        cfg.processor.inverse_kinematics.end_effector_step_sizes["y"],
+                        cfg.processor.inverse_kinematics.end_effector_step_sizes["z"],
+                    ],
+                    dtype=np.float64,
+                ),
+                use_gripper=cfg.processor.gripper.use_gripper
+                if cfg.processor.gripper is not None
+                else False,
+                max_gripper_pos=cfg.processor.max_gripper_pos
+                if cfg.processor.max_gripper_pos is not None
+                else 100.0,
+            )
+        )
+    action_pipeline_steps.append(
         InterventionActionProcessorStep(
             use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
             terminate_on_success=terminate_on_success,
-        ),
-    ]
+        )
+    )
 
     # Replace InverseKinematicsProcessor with new kinematic processors
     if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
@@ -505,10 +604,14 @@ def make_processors(
                 end_effector_step_sizes=cfg.processor.inverse_kinematics.end_effector_step_sizes,
                 motor_names=motor_names,
                 use_latched_reference=False,
-                use_ik_solution=True,
+                # Leader takeover must measure feedback from the real follower pose.
+                # Reusing the previous IK target compounds the tracking error and
+                # makes the follower keep moving after the leader has stopped.
+                use_ik_solution=cfg.processor.control_mode != "leader",
             ),
             EEBoundsAndSafety(
                 end_effector_bounds=cfg.processor.inverse_kinematics.end_effector_bounds,
+                raise_on_jump=False,
             ),
             GripperVelocityToJoint(
                 clip_max=cfg.processor.max_gripper_pos,
@@ -596,8 +699,11 @@ def reset_and_build_transition(
     env: gym.Env,
     env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
     action_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
+    teleop_device: Teleoperator | None = None,
 ) -> EnvTransition:
     """Reset env + processors and return the first env-processed transition."""
+    if teleop_device is not None and hasattr(teleop_device, "begin_reset"):
+        teleop_device.begin_reset()
     obs, info = env.reset()
     env_processor.reset()
     action_processor.reset()
@@ -635,7 +741,9 @@ def control_loop(
     print("- When not intervening, robot will stay still")
     print("- Press Ctrl+C to exit")
 
-    transition = reset_and_build_transition(env, env_processor, action_processor)
+    transition = reset_and_build_transition(
+        env, env_processor, action_processor, teleop_device=teleop_device
+    )
 
     # Determine if gripper is used
     use_gripper = cfg.env.processor.gripper.use_gripper if cfg.env.processor.gripper is not None else True
@@ -743,8 +851,21 @@ def control_loop(
             # Handle episode termination
             if terminated or truncated:
                 episode_time = time.perf_counter() - episode_start_time
+                success = bool(transition[TransitionKey.INFO].get(TeleopEvents.SUCCESS, False))
+                if truncated:
+                    end_reason = "time limit"
+                elif success:
+                    end_reason = "success"
+                else:
+                    end_reason = "failure/terminated"
                 logging.info(
                     f"Episode ended after {episode_step} steps in {episode_time:.1f}s with reward {transition[TransitionKey.REWARD]}"
+                )
+                print(
+                    f"[EPISODE {episode_idx + 1}/{cfg.dataset.num_episodes_to_record}] "
+                    f"END: {end_reason}, frames={episode_step}, "
+                    f"reward={float(transition[TransitionKey.REWARD]):.1f}",
+                    flush=True,
                 )
                 episode_step = 0
                 episode_idx += 1
@@ -758,19 +879,35 @@ def control_loop(
                         logging.info(f"Saving episode {episode_idx}")
                         dataset.save_episode()
 
-                # Reset for new episode
-                transition = reset_and_build_transition(env, env_processor, action_processor)
+                if episode_idx < cfg.dataset.num_episodes_to_record:
+                    print(
+                        f"[RESET] Next episode {episode_idx + 1}/{cfg.dataset.num_episodes_to_record} "
+                        "will reset automatically.",
+                        flush=True,
+                    )
+                    transition = reset_and_build_transition(
+                        env, env_processor, action_processor, teleop_device=teleop_device
+                    )
+                else:
+                    print("[DONE] All requested episodes have been recorded.", flush=True)
 
             # Maintain fps timing
             precise_sleep(max(dt - (time.perf_counter() - step_start_time), 0.0))
     finally:
-        if dataset is not None and dataset.writer is not None and dataset.writer.image_writer is not None:
-            logging.info("Waiting for image writer to finish...")
-            dataset.writer.image_writer.stop()
+        if dataset is not None:
+            if dataset.has_pending_frames():
+                print("[DATASET] Discarding the incomplete current episode.", flush=True)
+                dataset.clear_episode_buffer()
+            print("[DATASET] Finalizing parquet, videos, and episode metadata...", flush=True)
+            dataset.finalize()
+            print(
+                f"[DATASET] Saved {dataset.num_episodes} episodes, "
+                f"{dataset.num_frames} frames at {dataset.root}",
+                flush=True,
+            )
 
     if dataset is not None and cfg.dataset.push_to_hub:
-        logging.info("Finalizing dataset before pushing to hub")
-        dataset.finalize()
+        logging.info("Pushing finalized dataset to the hub")
         logging.info("Pushing dataset to hub")
         dataset.push_to_hub()
 
@@ -805,6 +942,12 @@ def replay_trajectory(
 @parser.wrap()
 def main(cfg: GymManipulatorConfig) -> None:
     """Main entry point for gym manipulator script."""
+    reset_config = cfg.env.processor.reset
+    effective_reset_pose = (
+        reset_config.fixed_reset_joint_positions if reset_config is not None else None
+    )
+    print(f"[CONFIG] LeRobot source: {__file__}", flush=True)
+    print(f"[CONFIG] Effective reset pose: {effective_reset_pose}", flush=True)
     env, teleop_device = make_robot_env(cfg.env)
     env_processor, action_processor = make_processors(env, teleop_device, cfg.env, cfg.device)
 

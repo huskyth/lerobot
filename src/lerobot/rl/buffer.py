@@ -570,7 +570,15 @@ class ReplayBuffer:
 
             # Fill the data for state keys
             for key in self.states:
-                frame_dict[key] = self.states[key][actual_idx].cpu()
+                value = self.states[key][actual_idx].cpu()
+                if "image" in key:
+                    if value.is_floating_point():
+                        if value.numel() > 0 and value.max() <= 1.0:
+                            value = value * 255.0
+                        value = value.clamp(0, 255).to(torch.uint8)
+                    else:
+                        value = value.to(torch.uint8)
+                frame_dict[key] = value
 
             # Fill action, reward, done
             frame_dict[ACTION] = self.actions[actual_idx].cpu()

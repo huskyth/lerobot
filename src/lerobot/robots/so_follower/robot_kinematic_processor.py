@@ -567,6 +567,7 @@ class InverseKinematicsRLStep(ProcessorStep):
     kinematics: RobotKinematics
     motor_names: list[str]
     q_curr: np.ndarray | None = field(default=None, init=False, repr=False)
+    hold_joint_positions: np.ndarray | None = field(default=None, init=False, repr=False)
     initial_guess_current_joints: bool = True
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
@@ -576,6 +577,40 @@ class InverseKinematicsRLStep(ProcessorStep):
             raise ValueError("Action is required for InverseKinematicsEEToJoints")
         action = dict(action)
 
+        complementary_data = new_transition.get(TransitionKey.COMPLEMENTARY_DATA, {})
+        if complementary_data.get("leader_hold", False):
+            raw_observation = new_transition.get(TransitionKey.OBSERVATION)
+            if raw_observation is None:
+                raise ValueError("Joints observation is required to hold the leader position")
+            if self.hold_joint_positions is None:
+                # Latch the last commanded target (or measured joints on first entry).
+                # Re-sending measured joints every frame causes gravity ratcheting.
+                if self.q_curr is not None:
+                    self.hold_joint_positions = self.q_curr.copy()
+                else:
+                    self.hold_joint_positions = np.array(
+                        [
+                            float(raw_observation.get(f"{name}.pos", 0.0))
+                            for name in self.motor_names
+                        ],
+                        dtype=float,
+                    )
+            hold_positions = self.hold_joint_positions.copy()
+            if "gripper" in self.motor_names and "ee.gripper_pos" in action:
+                hold_positions[self.motor_names.index("gripper")] = float(action["ee.gripper_pos"])
+                self.hold_joint_positions[self.motor_names.index("gripper")] = hold_positions[
+                    self.motor_names.index("gripper")
+                ]
+            joint_action = {
+                f"{name}.pos": float(hold_positions[i]) for i, name in enumerate(self.motor_names)
+            }
+            self.q_curr = hold_positions
+            complementary_data["IK_solution"] = self.q_curr
+            new_transition[TransitionKey.ACTION] = joint_action
+            new_transition[TransitionKey.COMPLEMENTARY_DATA] = complementary_data
+            return new_transition
+
+        self.hold_joint_positions = None
         x = action.pop("ee.x")
         y = action.pop("ee.y")
         z = action.pop("ee.z")
@@ -625,7 +660,6 @@ class InverseKinematicsRLStep(ProcessorStep):
                 action["gripper.pos"] = float(gripper_pos)
 
         new_transition[TransitionKey.ACTION] = action
-        complementary_data = new_transition.get(TransitionKey.COMPLEMENTARY_DATA, {})
         complementary_data["IK_solution"] = q_target
         new_transition[TransitionKey.COMPLEMENTARY_DATA] = complementary_data
         return new_transition
@@ -646,3 +680,4 @@ class InverseKinematicsRLStep(ProcessorStep):
     def reset(self):
         """Resets the initial guess for the IK solver."""
         self.q_curr = None
+        self.hold_joint_positions = None

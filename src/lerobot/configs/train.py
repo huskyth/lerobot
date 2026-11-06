@@ -13,11 +13,13 @@
 # limitations under the License.
 import builtins
 import datetime as dt
+import enum
 import json
+import logging
 import multiprocessing
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +34,33 @@ from lerobot.utils.hub import HubMixin, find_latest_hub_checkpoint
 from lerobot.utils.sample_weighting import SampleWeightingConfig
 
 from . import parser
-from .default import DatasetConfig, EvalConfig, JobConfig, PeftConfig, WandBConfig
+from .default import DatasetConfig, EvalConfig, JobConfig, PeftConfig, SwanLabConfig, WandBConfig
 from .policies import PreTrainedConfig
 from .rewards import RewardModelConfig
 
 TRAIN_CONFIG_NAME = "train_config.json"
+
+
+def _jsonable_config(value: Any) -> Any:
+    """Convert dataclass-heavy training configs to JSON-safe values."""
+    if is_dataclass(value):
+        encoded = {f.name: _jsonable_config(getattr(value, f.name)) for f in fields(value)}
+        if isinstance(value, draccus.ChoiceRegistry):
+            encoded[draccus.CHOICE_TYPE_KEY] = value.get_choice_name(value.__class__)
+        return encoded
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(_jsonable_config(k)): _jsonable_config(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable_config(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "item"):
+        return value.item()
+    return str(value)
 
 
 def _migrate_legacy_rabc_fields(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -126,6 +150,7 @@ class TrainPipelineConfig(HubMixin):
     scheduler: LRSchedulerConfig | None = None
     eval: EvalConfig = field(default_factory=EvalConfig)
     wandb: WandBConfig = field(default_factory=WandBConfig)
+    swanlab: SwanLabConfig = field(default_factory=SwanLabConfig)
     peft: PeftConfig | None = None
 
     # Where to run training (local default, or an HF Jobs flavor). See JobConfig.
@@ -223,7 +248,7 @@ class TrainPipelineConfig(HubMixin):
         if self.reward_model is not None:
             self.reward_model.pretrained_path = str(policy_dir)
 
-    def validate(self) -> None:
+    def validate(self, *, allow_existing_output_dir: bool = False) -> None:
         available_contexts = multiprocessing.get_all_start_methods()
         if (
             self.dataloader_multiprocessing_context is not None
@@ -256,7 +281,12 @@ class TrainPipelineConfig(HubMixin):
             else:
                 self.job_name = f"{self.env.type}_{active_cfg.type}"
 
-        if not self.resume and isinstance(self.output_dir, Path) and self.output_dir.is_dir():
+        if (
+            not self.resume
+            and not allow_existing_output_dir
+            and isinstance(self.output_dir, Path)
+            and self.output_dir.is_dir()
+        ):
             raise FileExistsError(
                 f"Output directory {self.output_dir} already exists and resume is {self.resume}. "
                 f"Please change your output directory so that {self.output_dir} is not overwritten."
@@ -301,7 +331,13 @@ class TrainPipelineConfig(HubMixin):
 
     def _save_pretrained(self, save_directory: Path) -> None:
         with open(save_directory / TRAIN_CONFIG_NAME, "w") as f, draccus.config_type("json"):
-            draccus.dump(self, f, indent=4)
+            try:
+                draccus.dump(self, f, indent=4)
+            except TypeError as exc:
+                logging.warning("Falling back to JSON-safe training config serialization: %s", exc)
+                f.seek(0)
+                f.truncate()
+                json.dump(_jsonable_config(self), f, indent=2)
 
     @classmethod
     def from_pretrained(

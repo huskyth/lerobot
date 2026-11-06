@@ -35,6 +35,12 @@ class SOLeaderConfig:
     # happen on failure, so the steady-state read cost is unchanged.
     num_read_retries: int = 2
 
+    # Track the follower while the policy controls the robot. Press Space to toggle takeover,
+    # s for success, Esc for failure, and r to rerecord.
+    leader_follower_mode: bool = False
+    # Maximum leader joint movement per follow update, in degrees.
+    leader_follow_max_step_deg: float = 2.0
+
 
 @TeleoperatorConfig.register_subclass("so101_leader")
 @TeleoperatorConfig.register_subclass("so100_leader")

@@ -507,7 +507,10 @@ class InterventionActionProcessorStep(ProcessorStep):
             else:
                 action_list = teleop_action
 
-            teleop_action_tensor = torch.tensor(action_list, dtype=action.dtype, device=action.device)
+            if isinstance(teleop_action, torch.Tensor):
+                teleop_action_tensor = teleop_action.to(dtype=action.dtype, device=action.device).clone()
+            else:
+                teleop_action_tensor = torch.tensor(action_list, dtype=action.dtype, device=action.device)
             new_transition[TransitionKey.ACTION] = teleop_action_tensor
 
         # Handle episode termination

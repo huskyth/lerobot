@@ -121,7 +121,13 @@ from .train_rl import TrainRLServerPipelineConfig
 def actor_cli(cfg: TrainRLServerPipelineConfig):
     # Fail fast with a friendly error if the optional ``hilserl`` extra is missing.
     require_package("grpcio", extra="hilserl", import_name="grpc")
-    cfg.validate()
+    if cfg.resume:
+        from .learner import handle_resume_logic
+
+        cfg = handle_resume_logic(cfg)
+    else:
+        # The learner owns creation of the shared output directory.
+        cfg.validate(allow_existing_output_dir=True)
     display_pid = False
     if not use_threads(cfg):
         ensure_multiprocessing_start_method(cfg.policy.concurrency.multiprocessing_context)
@@ -286,7 +292,9 @@ def act_with_policy(
         dataset_stats=cfg.policy.dataset_stats,
     )
 
-    transition = reset_and_build_transition(online_env, env_processor, action_processor)
+    transition = reset_and_build_transition(
+        online_env, env_processor, action_processor, teleop_device=teleop_device
+    )
 
     # NOTE: For the moment we will solely handle the case of a single environment
     sum_reward_episode = 0
@@ -341,10 +349,6 @@ def act_with_policy(
             if k in cfg.policy.input_features
         }
 
-        # Teleop action is the action that was executed in the environment
-        # It is either the action from the teleop device or the action from the policy
-        executed_action = new_transition[TransitionKey.COMPLEMENTARY_DATA]["teleop_action"]
-
         reward = new_transition[TransitionKey.REWARD]
         done = new_transition.get(TransitionKey.DONE, False)
         truncated = new_transition.get(TransitionKey.TRUNCATED, False)
@@ -355,6 +359,11 @@ def act_with_policy(
         # Check for intervention from transition info
         intervention_info = new_transition[TransitionKey.INFO]
         is_intervention = bool(intervention_info.get(TeleopEvents.IS_INTERVENTION, False))
+        executed_action = (
+            new_transition[TransitionKey.COMPLEMENTARY_DATA]["teleop_action"]
+            if is_intervention
+            else action
+        )
         if is_intervention:
             episode_intervention = True
             episode_intervention_steps += 1
@@ -420,7 +429,9 @@ def act_with_policy(
             episode_intervention_steps = 0
             episode_total_steps = 0
 
-            transition = reset_and_build_transition(online_env, env_processor, action_processor)
+            transition = reset_and_build_transition(
+                online_env, env_processor, action_processor, teleop_device=teleop_device
+            )
 
         if cfg.env.fps is not None:
             dt_time = time.perf_counter() - start_time

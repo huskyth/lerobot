@@ -1,0 +1,92 @@
+{
+  "env": {
+    "name": "real_robot",
+    "fps": 10,
+    "task": "push cube to goal",
+    "robot": {
+      "type": "so101_follower",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00",
+      "id": "follower_arm",
+      "use_degrees": true,
+      "max_relative_target": 5.0,
+      "cameras": {
+        "top": {
+          "type": "opencv",
+          "index_or_path": "/dev/video2",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG"
+        },
+        "wrist": {
+          "type": "opencv",
+          "index_or_path": "/dev/video0",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG"
+        }
+      }
+    },
+    "teleop": {
+      "type": "so101_leader",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00",
+      "id": "leader_arm",
+      "use_degrees": true,
+      "leader_follower_mode": true
+    },
+    "processor": {
+      "control_mode": "leader",
+      "max_gripper_pos": 100.0,
+      "observation": {
+        "display_cameras": true,
+        "add_joint_velocity_to_observation": false,
+        "add_current_to_observation": false,
+        "add_ee_pose_to_observation": false
+      },
+      "image_preprocessing": {
+        "crop_params_dict": {},
+        "resize_size": [128, 128]
+      },
+      "gripper": {
+        "use_gripper": true,
+        "gripper_penalty": 0.0
+      },
+      "reset": {
+        "fixed_reset_joint_positions": [-6.198, -101.626, 96.659, 71.868, -4.264, 2.094],
+        "pre_reset_delay_s": 3.0,
+        "reset_time_s": 5.0,
+        "control_time_s": 60.0,
+        "terminate_on_success": true
+      },
+      "inverse_kinematics": {
+        "urdf_path": "rl/assets/so101/so101_new_calib.urdf",
+        "target_frame_name": "gripper_frame_link",
+        "end_effector_bounds": {
+          "min": [0.115, -0.145, -0.03],
+          "max": [0.26, 0.145, 0.1]
+        },
+        "end_effector_step_sizes": {
+          "x": 0.009,
+          "y": 0.009,
+          "z": 0.01
+        }
+      },
+      "reward_classifier": {
+        "pretrained_path": null,
+        "success_threshold": 0.5,
+        "success_reward": 1.0
+      }
+    }
+  },
+  "dataset": {
+    "repo_id": "local/so101_push_cube",
+    "root": "data/so101_push_cube",
+    "task": "Push the cube into the goal region.",
+    "num_episodes_to_record": 10,
+    "replay_episode": null,
+    "push_to_hub": false
+  },
+  "mode": "record",
+  "device": "cuda"
+}
