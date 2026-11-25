@@ -26,13 +26,12 @@ import torch
 from torch import Tensor
 
 from lerobot.configs import FeatureType, PipelineFeatureType, PolicyFeature, PreTrainedConfig
-from lerobot.processor import PolicyAction, PolicyProcessorPipeline, rename_keys
+from lerobot.processor import PolicyAction, PolicyProcessorPipeline
 from lerobot.sim import EnvDescriptor
 from lerobot.utils.constants import ACTION, OBS_ENV_STATE, OBS_IMAGE, OBS_IMAGES, OBS_STATE, OBS_STR
 from lerobot.utils.utils import get_channel_first_image_shape
 
 from .configs import EnvConfig
-from .factory import descriptor_features
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +158,7 @@ def env_to_policy_features(env_cfg: EnvConfig) -> dict[str, PolicyFeature]:
         else:
             feature = ft
 
-        # Only envs that declare their own features map them; the others keep their keys.
-        policy_key = env_cfg.features_map.get(key, key)
+        policy_key = env_cfg.features_map[key]
         policy_features[policy_key] = feature
 
     return policy_features
@@ -168,13 +166,17 @@ def env_to_policy_features(env_cfg: EnvConfig) -> dict[str, PolicyFeature]:
 
 def _observation_features(descriptor: EnvDescriptor) -> dict[str, PolicyFeature]:
     """Return the sim's observation features as the policy side receives them, images channel first."""
-    return {
-        name: PolicyFeature(feature.type, (feature.shape[2], *feature.shape[:2]))
-        if feature.type is FeatureType.VISUAL
-        else feature
-        for name, feature in descriptor_features(descriptor).items()
-        if name != ACTION
-    }
+    features = {}
+    for spec in descriptor.features:
+        if spec.kind == "rgb":
+            features[spec.name] = PolicyFeature(
+                FeatureType.VISUAL, (spec.shape[2], spec.shape[0], spec.shape[1])
+            )
+        elif spec.name == OBS_ENV_STATE:
+            features[spec.name] = PolicyFeature(FeatureType.ENV, spec.shape)
+        else:
+            features[spec.name] = PolicyFeature(FeatureType.STATE, spec.shape)
+    return features
 
 
 # TODO: Consider refactoring the validation ways in the future.
@@ -196,7 +198,7 @@ def validate_checkpoint(
     if env_preprocessor is not None:
         features = {PipelineFeatureType.OBSERVATION: observed, PipelineFeatureType.ACTION: {}}
         observed = env_preprocessor.transform_features(features)[PipelineFeatureType.OBSERVATION]
-    available = rename_keys(observed, rename_map)
+    available = {rename_map.get(name, name): feature for name, feature in observed.items()}
     placeholders = {f"{OBS_IMAGES}.empty_camera_{i}" for i in range(getattr(config, "empty_cameras", 0))}
     for name, expected in (config.input_features or {}).items():
         if name in placeholders:

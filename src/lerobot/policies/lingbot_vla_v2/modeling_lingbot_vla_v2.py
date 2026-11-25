@@ -36,7 +36,6 @@ from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.rtc.modeling_rtc import RTCProcessor
 from lerobot.policies.utils import populate_queues
 from lerobot.utils.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import require_package
 
 from .configuration_lingbot_vla_v2 import LingbotVLAV2Config as LeRobotLingbotVLAV2Config
@@ -554,8 +553,7 @@ class FlowMatchingV2(FlowMatchingV1):
         nn.Module.__init__(self)
         self.config = config
         self.rtc_processor = rtc_processor
-        repo_id, revision = split_hub_reference(config.tokenizer_path)
-        vlm_config = AutoConfig.from_pretrained(repo_id, revision=revision, code_revision=revision)
+        vlm_config = AutoConfig.from_pretrained(config.tokenizer_path)
         qwenvl_with_export_config = QwenvlWithExpertV2Config(
             freeze_vision_encoder=config.freeze_vision_encoder,
             train_expert_only=config.train_expert_only,

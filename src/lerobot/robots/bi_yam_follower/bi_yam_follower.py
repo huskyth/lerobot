@@ -54,14 +54,14 @@ class BiYamFollower(BimanualMixin, Robot):
             )
         left_arm_cameras = {**config.left_arm_config.cameras, **config.cameras}
 
-        # One fault event for both controllers, so a fault on either arm stops both.
-        self._fault = threading.Event()
+        # One stop event for both controllers, so a fault on either arm stops both.
+        self._stop = threading.Event()
         self.left_arm = YamFollower(
-            self._arm_robot_config("left", config.left_arm_config, left_arm_cameras), fault_event=self._fault
+            self._arm_robot_config("left", config.left_arm_config, left_arm_cameras), stop_event=self._stop
         )
         self.right_arm = YamFollower(
             self._arm_robot_config("right", config.right_arm_config, config.right_arm_config.cameras),
-            fault_event=self._fault,
+            stop_event=self._stop,
         )
         self.arms = {"left": self.left_arm, "right": self.right_arm}
         self.supports_position_hold = (
@@ -119,15 +119,15 @@ class BiYamFollower(BimanualMixin, Robot):
                     camera.connect()
             self.configure()
             if self.is_calibrated:
-                # Clear the shared fault event before either controller starts: clearing it later could erase
-                # a fault of the arm that started first, which makes the second arm refuse to start. Check
-                # both initial positions before either arm gets torque.
-                self._fault.clear()
+                # Check both initial positions before either arm gets torque. This also clears the stop event
+                # both arms share, so it must come before either controller starts: clearing it later could
+                # erase a fault of the arm that started first.
                 for arm in self.arms.values():
                     arm.prepare_controller()
                 for arm in self.arms.values():
                     arm.controller.start()
         except BaseException:
+            self._stop.set()
             if any(arm.is_connected for arm in self.arms.values()):
                 try:
                     self.disconnect()
@@ -159,6 +159,7 @@ class BiYamFollower(BimanualMixin, Robot):
         """Stop both arms, even if only one is connected or the first fails to stop."""
         if not any(arm.is_connected for arm in self.arms.values()):
             raise DeviceNotConnectedError("BiYamFollower is not connected. Run `.connect()` first.")
+        self._stop.set()
         first_error: BaseException | None = None
         for side, arm in self.arms.items():
             if not arm.is_connected:

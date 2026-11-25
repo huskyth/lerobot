@@ -24,7 +24,6 @@ import torchvision.transforms.functional as tvf
 from torchvision.transforms.functional import InterpolationMode
 
 from lerobot.utils.device_utils import auto_select_torch_device
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import _transformers_available, require_package
 
 if TYPE_CHECKING or _transformers_available:
@@ -131,12 +130,7 @@ class InternVL3Embedder(nn.Module):
 
         require_package("transformers", extra="evo1")
 
-        loading_kwargs = dict(hub_kwargs)
-        code_revision = loading_kwargs.pop("code_revision", None)
-        repo_id, revision = split_hub_reference(model_name, loading_kwargs.pop("revision", None))
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            repo_id, revision=revision, code_revision=revision or code_revision, **loading_kwargs
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, **hub_kwargs)
         self.model_dtype = model_dtype
 
         attn_implementation = (
@@ -148,13 +142,11 @@ class InternVL3Embedder(nn.Module):
             )
 
         self.model = AutoModel.from_pretrained(
-            repo_id,
+            model_name,
             torch_dtype=model_dtype,
             attn_implementation=attn_implementation,
             low_cpu_mem_usage=True,
-            revision=revision,
-            code_revision=revision or code_revision,
-            **loading_kwargs,
+            **hub_kwargs,
         ).to(self._requested_device)
 
         checkpoint_image_size = getattr(self.model.config.vision_config, "image_size", None)

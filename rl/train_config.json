@@ -1,0 +1,332 @@
+{
+  "output_dir": "outputs/hilserl/so101_push_cube_hardcube15_20261112",
+  "job_name": "so101_push_cube_hardcube15_hilserl",
+  "resume": true,
+  "seed": 1000,
+  "num_workers": 0,
+  "batch_size": 64,
+  "steps": 145000,
+  "log_freq": 100,
+  "save_checkpoint": true,
+  "save_freq": 5000,
+  "trackio": {
+    "enable": true,
+    "project": "so101-hilserl",
+    "disable_artifact": true
+  },
+  "dataset": {
+    "repo_id": "local/so101_push_cube_hardcube15_20261112",
+    "root": "data/so101_push_cube_hardcube15_20261112",
+    "use_imagenet_stats": false
+  },
+  "algorithm": {
+    "type": "sac",
+    "actor_lr": 0.0003,
+    "critic_lr": 0.0003,
+    "temperature_lr": 0.0003,
+    "discount": 0.97,
+    "use_backup_entropy": true,
+    "critic_target_update_weight": 0.005,
+    "num_critics": 2,
+    "num_subsample_critics": null,
+    "critic_network_kwargs": {
+      "hidden_dims": [
+        256,
+        256
+      ],
+      "activate_final": true,
+      "final_activation": null
+    },
+    "discrete_critic_network_kwargs": {
+      "hidden_dims": [
+        256,
+        256
+      ],
+      "activate_final": true,
+      "final_activation": null
+    },
+    "temperature_init": 0.01,
+    "target_entropy": null,
+    "utd_ratio": 1,
+    "policy_update_freq": 1,
+    "grad_clip_norm": 10.0,
+    "use_torch_compile": false
+  },
+  "mixer": "online_offline",
+  "online_ratio": 0.5,
+  "policy": {
+    "type": "gaussian_actor",
+    "push_to_hub": false,
+    "n_obs_steps": 1,
+    "normalization_mapping": {
+      "VISUAL": "MEAN_STD",
+      "STATE": "MIN_MAX",
+      "ENV": "MIN_MAX",
+      "ACTION": "MIN_MAX"
+    },
+    "input_features": {
+      "observation.images.top": {
+        "type": "VISUAL",
+        "shape": [
+          3,
+          128,
+          128
+        ]
+      },
+      "observation.images.wrist": {
+        "type": "VISUAL",
+        "shape": [
+          3,
+          128,
+          128
+        ]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [
+          6
+        ]
+      }
+    },
+    "output_features": {
+      "action": {
+        "type": "ACTION",
+        "shape": [
+          3
+        ]
+      }
+    },
+    "dataset_stats": {
+      "observation.images.top": {
+        "mean": [
+          0.4664500205688008,
+          0.464623992155887,
+          0.47466138766161575
+        ],
+        "std": [
+          0.2795977246427253,
+          0.2848247751763182,
+          0.274686467832032
+        ]
+      },
+      "observation.images.wrist": {
+        "mean": [
+          0.37270290566859887,
+          0.36682936623783535,
+          0.3724443150414786
+        ],
+        "std": [
+          0.30154680504669684,
+          0.29274364870985403,
+          0.2971570378701019
+        ]
+      },
+      "observation.state": {
+        "min": [
+          -17.186813354492188,
+          -101.89010620117188,
+          0.3956044018268585,
+          28.52747344970703,
+          -24.30769157409668,
+          4.3979058265686035
+        ],
+        "max": [
+          6.02197790145874,
+          21.098901748657227,
+          96.57142639160156,
+          72.57142639160156,
+          -3.0329670906066895,
+          4.3979058265686035
+        ]
+      },
+      "action": {
+        "min": [
+          -1.0,
+          -1.0,
+          -1.0
+        ],
+        "max": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    "num_discrete_actions": 3,
+    "device": "cuda",
+    "storage_device": "cpu",
+    "use_amp": false,
+    "vision_encoder_name": "lerobot/resnet10",
+    "freeze_vision_encoder": true,
+    "image_encoder_hidden_dim": 32,
+    "shared_encoder": true,
+    "online_steps": 30000,
+    "online_buffer_capacity": 20000,
+    "offline_buffer_capacity": 10000,
+    "online_step_before_learning": 200,
+    "state_encoder_hidden_dim": 256,
+    "latent_dim": 64,
+    "actor_network_kwargs": {
+      "hidden_dims": [
+        256,
+        256
+      ],
+      "activate_final": true
+    },
+    "policy_kwargs": {
+      "use_tanh_squash": true,
+      "std_min": 1e-05,
+      "std_max": 10.0,
+      "init_final": 0.05
+    },
+    "actor_learner_config": {
+      "learner_host": "127.0.0.1",
+      "learner_port": 50051,
+      "policy_parameters_push_frequency": 2
+    },
+    "concurrency": {
+      "actor": "threads",
+      "learner": "threads"
+    },
+    "repo_id": null
+  },
+  "env": {
+    "type": "gym_manipulator",
+    "name": "real_robot",
+    "fps": 10,
+    "task": "Push the green cube into the goal region.",
+    "robot": {
+      "type": "so101_follower",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00",
+      "id": "follower_arm",
+      "use_degrees": true,
+      "max_relative_target": null,
+      "cameras": {
+        "top": {
+          "type": "opencv",
+          "index_or_path": "/dev/v4l/by-id/usb-2MP_USB_Camera_2MP_USB_Camera_04434000_P120800_SN0002-video-index0",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG",
+          "warmup_s": 3
+        },
+        "wrist": {
+          "type": "opencv",
+          "index_or_path": "/dev/v4l/by-id/usb-JoyandAI_JYU2C-2083_JYU2C-2083-2609096-video-index0",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG",
+          "warmup_s": 3
+        }
+      }
+    },
+    "teleop": {
+      "type": "so101_leader",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00",
+      "id": "leader_arm",
+      "use_degrees": true,
+      "leader_follower_mode": true
+    },
+    "processor": {
+      "control_mode": "leader",
+      "max_gripper_pos": 100.0,
+      "observation": {
+        "display_cameras": false,
+        "add_joint_velocity_to_observation": false,
+        "add_current_to_observation": false,
+        "add_ee_pose_to_observation": false
+      },
+      "image_preprocessing": {
+        "crop_params_dict": {},
+        "resize_size": [
+          128,
+          128
+        ]
+      },
+      "gripper": {
+        "use_gripper": true,
+        "gripper_penalty": 0.0,
+        "lock_gripper": true
+      },
+      "reset": {
+        "fixed_reset_joint_positions": [
+          -1.099002,
+          -95.947376,
+          87.729507,
+          76.172869,
+          -9.978002,
+          3.665
+        ],
+        "reset_time_s": 5.0,
+        "pre_record_delay_s": 5.0,
+        "control_time_s": 60.0,
+        "terminate_on_success": true
+      },
+      "inverse_kinematics": {
+        "urdf_path": "/home/husky/Desktop/lerobot/rl/assets/so101/so101_new_calib.urdf",
+        "target_frame_name": "gripper_frame_link",
+        "orientation_weight": 0.03,
+        "end_effector_bounds": {
+          "min": [
+            0.13967203387855132,
+            -0.03015,
+            0.006717841916109839
+          ],
+          "max": [
+            0.3265,
+            0.08321,
+            0.043
+          ]
+        },
+        "end_effector_step_sizes": {
+          "x": 0.002,
+          "y": 0.002,
+          "z": 0.003
+        }
+      },
+      "reward_classifier": {
+        "pretrained_path": null,
+        "success_threshold": 0.5,
+        "success_reward": 1.0
+      }
+    },
+    "features": {
+      "observation.images.top": {
+        "type": "VISUAL",
+        "shape": [
+          3,
+          128,
+          128
+        ]
+      },
+      "observation.images.wrist": {
+        "type": "VISUAL",
+        "shape": [
+          3,
+          128,
+          128
+        ]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [
+          6
+        ]
+      },
+      "action": {
+        "type": "ACTION",
+        "shape": [
+          3
+        ]
+      }
+    },
+    "features_map": {
+      "observation.images.top": "observation.images.top",
+      "observation.images.wrist": "observation.images.wrist",
+      "observation.state": "observation.state",
+      "action": "action"
+    }
+  }
+}

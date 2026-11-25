@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING
 import torch
 from torch import nn
 
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import _transformers_available, require_package
 
 if TYPE_CHECKING or _transformers_available:
@@ -88,21 +87,18 @@ class SmolVLMWithExpertModel(nn.Module):
     ):
         super().__init__()
         require_package("transformers", extra="smolvla")
-        repo_id, revision = split_hub_reference(model_id)
         if load_vlm_weights:
             print(f"Loading  {model_id} weights ...")
             self.vlm = AutoModelForImageTextToText.from_pretrained(
-                repo_id,
+                model_id,
                 torch_dtype="bfloat16",
                 low_cpu_mem_usage=True,
-                revision=revision,
-                code_revision=revision,
             )
             config = self.vlm.config
         else:
-            config = AutoConfig.from_pretrained(repo_id, revision=revision, code_revision=revision)
+            config = AutoConfig.from_pretrained(model_id)
             self.vlm = SmolVLMForConditionalGeneration(config=config)
-        self.processor = AutoProcessor.from_pretrained(repo_id, revision=revision, code_revision=revision)
+        self.processor = AutoProcessor.from_pretrained(model_id)
         if num_vlm_layers > 0:
             print(f"Reducing the number of VLM layers to {num_vlm_layers} ...")
             self.get_vlm_model().text_model.layers = self.get_vlm_model().text_model.layers[:num_vlm_layers]

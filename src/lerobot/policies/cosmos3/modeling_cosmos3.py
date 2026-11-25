@@ -30,9 +30,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
+from safetensors.torch import load_file
 from torch import Tensor
 
-from lerobot.policies.checkpoint import SafetensorsCheckpoint
 from lerobot.policies.chunk import ChunkPolicySpec
 from lerobot.policies.common.vla_utils import pad_vector
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -190,22 +190,18 @@ class Cosmos3Policy(PreTrainedPolicy):
         }
 
     @classmethod
-    def _load_checkpoint(
-        cls, model: "Cosmos3Policy", checkpoint: SafetensorsCheckpoint, map_location: str, strict: bool
-    ) -> "Cosmos3Policy":
+    def _load_as_safetensor(cls, model, model_file: str, map_location: str, strict: bool):
         """
         Load the weights. Without `load_action_modules` the action modules keep their initialization (the
         native `keys_to_skip_loading`), then `load_action_modules` turns back to true so the checkpoints of
         the run load them.
         """
         if model.config.load_action_modules:
-            return super()._load_checkpoint(model, checkpoint, map_location, strict)
+            return super()._load_as_safetensor(model, model_file, map_location, strict)
         action_modules = model.model.network._action_modules
         state_dict = {
             key: value
-            for key, value in checkpoint.load_state_dict(
-                device=resolve_safetensors_device(map_location)
-            ).items()
+            for key, value in load_file(model_file, device=resolve_safetensors_device(map_location)).items()
             if not any(part in action_modules for part in key.split("."))
         }
         missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
@@ -214,12 +210,12 @@ class Cosmos3Policy(PreTrainedPolicy):
         ]
         if strict and (missing_keys or unexpected_keys):
             raise RuntimeError(
-                f"Missing keys {missing_keys}, unexpected keys {unexpected_keys} in {checkpoint.files}."
+                f"Missing keys {missing_keys}, unexpected keys {unexpected_keys} in {model_file}."
             )
         log_model_loading_keys(missing_keys, unexpected_keys)
         model.config.load_action_modules = True
         logging.info(
-            f"Kept the initialization of the action modules {action_modules} when loading {checkpoint.files}."
+            f"Kept the initialization of the action modules {action_modules} when loading {model_file}."
         )
         return model
 

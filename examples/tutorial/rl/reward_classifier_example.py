@@ -20,9 +20,6 @@ def main():
         device=device,
         # backbone model to extract features from the image frames
         model_name="microsoft/resnet-18",
-        # This built-in encoder needs no custom code. If you switch to an encoder
-        # that requires it, review its code before setting this to True.
-        trust_remote_code=False,
     )
 
     # Make reward model, preprocessor, and optimizer

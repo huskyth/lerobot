@@ -25,7 +25,7 @@ bucket to independent lengths, so CFG runs as two bs=1 forward passes (see
 import math
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import torch
 from einops import rearrange
@@ -68,7 +68,7 @@ class Qwen3VLEmbedder(nn.Module):
         self.stack_channels = params.stack_channels
 
         # Shared encoders may live in a pinned subfolder of the base model repo.
-        hub_kwargs: dict[str, Any] = {}
+        hub_kwargs = {}
         if not os.path.exists(model_spec):
             body, _, revision = model_spec.partition("@")
             model_spec, _, subfolder = body.partition(":")
@@ -76,9 +76,7 @@ class Qwen3VLEmbedder(nn.Module):
         self.model = Qwen3VLForConditionalGeneration.from_pretrained(
             model_spec, torch_dtype=self.dtype, **hub_kwargs
         )
-        self.processor = AutoProcessor.from_pretrained(
-            model_spec, code_revision=hub_kwargs.get("revision"), **hub_kwargs
-        )
+        self.processor = AutoProcessor.from_pretrained(model_spec, **hub_kwargs)
         if self.processor.tokenizer.padding_side != "right":
             raise ValueError("the text encoder requires a right-padding tokenizer")
 

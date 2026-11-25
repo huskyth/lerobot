@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from huggingface_hub import snapshot_download
 
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import _datasets_available, _transformers_available, require_package
 
 if TYPE_CHECKING or _transformers_available:
@@ -203,15 +202,12 @@ def _validate_fast_reconstruction(
     return report, decoded
 
 
-def _load_fast_fitter(base_tokenizer_name: str, *, trust_remote_code: bool = False) -> Any:
+def _load_fast_fitter(base_tokenizer_name: str) -> Any:
     """Load FAST's fitting implementation without requiring its universal BPE weights."""
-    repo_id, revision = split_hub_reference(base_tokenizer_name)
     try:
-        return AutoProcessor.from_pretrained(
-            repo_id, trust_remote_code=trust_remote_code, revision=revision, code_revision=revision
-        )
+        return AutoProcessor.from_pretrained(base_tokenizer_name, trust_remote_code=True)
     except ValueError as error:
-        if not trust_remote_code or repo_id != "physical-intelligence/fast":
+        if base_tokenizer_name != "physical-intelligence/fast":
             raise
         logger.warning(
             "Could not load the universal FAST tokenizer backend; loading its fitting class directly: %s",
@@ -219,9 +215,7 @@ def _load_fast_fitter(base_tokenizer_name: str, *, trust_remote_code: bool = Fal
         )
         return get_class_from_dynamic_module(
             "processing_action_tokenizer.UniversalActionProcessor",
-            repo_id,
-            revision=revision,
-            code_revision=revision,
+            base_tokenizer_name,
         )
 
 
@@ -244,7 +238,6 @@ def fit_fast_tokenizer(
     validation_samples: int = 256,
     max_reconstruction_rmse: float = 0.10,
     max_dim_rmse: float = 0.20,
-    trust_remote_code: bool = False,
 ) -> str:
     """Fit a FAST tokenizer on a LeRobot dataset's action distribution.
 
@@ -437,7 +430,7 @@ def fit_fast_tokenizer(
 
     actions = _normalize_actions(actions, normalization_mode, action_stats)
 
-    base = _load_fast_fitter(base_tokenizer_name, trust_remote_code=trust_remote_code)
+    base = _load_fast_fitter(base_tokenizer_name)
     if not hasattr(base, "fit"):
         raise ImportError(
             f"Base FAST tokenizer {base_tokenizer_name!r} has no ``.fit()`` "
@@ -514,7 +507,6 @@ def resolve_fast_tokenizer(
         "dataset_repo_id": dataset_repo_id,
         "cache_dir": Path(config.fast_tokenizer_cache_dir).expanduser(),
         "base_tokenizer_name": config.action_tokenizer_name,
-        "trust_remote_code": getattr(config, "trust_remote_code", False),
         "n_samples": config.fast_tokenizer_fit_samples,
         "chunk_size": config.chunk_size,
         "dataset_root": dataset_root,

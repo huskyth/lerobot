@@ -244,25 +244,14 @@ def test_validate_requires_repo_id_for_local_push():
         cfg.validate()
 
 
-@pytest.mark.parametrize("consent", [False, True])
-@pytest.mark.parametrize("policy_type", ["act", "pi0_fast"])
-def test_build_remote_config_applies_overrides(tmp_path, consent, policy_type):
-    from lerobot.policies.factory import make_policy_config
-
+def test_build_remote_config_applies_overrides(tmp_path):
     cfg = _minimal_cfg()
-    cfg.policy = make_policy_config(policy_type, device="cpu")
-    cfg.policy.trust_remote_code = consent
     dest = tmp_path / "train_config.json"
     out = build_remote_config_file(cfg, "u/run", dest)
     assert out == dest
     data = json.loads(dest.read_text())
     # `job` is client-only orchestration and must be stripped for the pod.
     assert "job" not in data
-    assert "trust_remote_code" not in data["policy"]
-    args = ["--policy.trust_remote_code=true"] if consent else []
-    restored = TrainPipelineConfig.from_pretrained(tmp_path, cli_args=args)
-    assert restored.policy.trust_remote_code is consent
-    assert cfg.policy.trust_remote_code is consent
     # save_checkpoint_to_hub defaults off → omitted so older images accept the config.
     assert "save_checkpoint_to_hub" not in data
     assert data["policy"]["push_to_hub"] is True
@@ -325,8 +314,7 @@ def test_submit_requires_login(monkeypatch):
         submit_to_hf(cfg)
 
 
-@pytest.mark.parametrize("consent", [False, True])
-def test_submit_passes_validation_and_submits(monkeypatch, consent):
+def test_submit_passes_validation_and_submits(monkeypatch):
     """A type-based policy with no explicit repo_id is auto-assigned one and submitted."""
     from unittest.mock import MagicMock
 
@@ -378,7 +366,6 @@ def test_submit_passes_validation_and_submits(monkeypatch, consent):
         ],
     )
 
-    cfg.policy.trust_remote_code = consent
     # Must NOT raise (pre-fix this raised ValueError about missing repo_id)
     submit_to_hf(cfg)
 
@@ -389,7 +376,6 @@ def test_submit_passes_validation_and_submits(monkeypatch, consent):
     # The pod runs `lerobot-train --config_path=<staged repo>` on the requested flavor/image.
     assert call["command"][0] == "lerobot-train"
     assert call["command"][1].startswith("--config_path=")
-    assert ("--policy.trust_remote_code=true" in call["command"]) is consent
     assert call["flavor"] == "a10g-small"
     assert call["image"] == "huggingface/lerobot-gpu:latest"
     # The Hub token is forwarded so the pod can pull the (possibly private) dataset.

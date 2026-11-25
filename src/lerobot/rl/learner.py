@@ -876,7 +876,9 @@ def initialize_offline_replay_buffer(
         state_keys=cfg.policy.input_features.keys(),
         storage_device=storage_device,
         optimize_memory=True,
-        capacity=cfg.policy.offline_buffer_capacity,
+        # Avoid allocating unused capacity while restoring a partial offline
+        # dataset. The configured value remains the upper bound.
+        capacity=min(cfg.policy.offline_buffer_capacity, len(offline_dataset)),
     )
     return offline_replay_buffer
 

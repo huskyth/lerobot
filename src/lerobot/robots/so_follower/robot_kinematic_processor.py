@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -212,6 +213,7 @@ class EEBoundsAndSafety(RobotActionProcessorStep):
     max_ee_step_m: float = 0.05
     raise_on_jump: bool = True
     _last_pos: np.ndarray | None = field(default=None, init=False, repr=False)
+    _last_clip_log_time: float = field(default=0.0, init=False, repr=False)
 
     def action(self, action: RobotAction) -> RobotAction:
         x = action["ee.x"]
@@ -228,10 +230,22 @@ class EEBoundsAndSafety(RobotActionProcessorStep):
             )
 
         pos = np.array([x, y, z], dtype=float)
+        requested_pos = pos.copy()
         twist = np.array([wx, wy, wz], dtype=float)
 
         # Clip position
         pos = np.clip(pos, self.end_effector_bounds["min"], self.end_effector_bounds["max"])
+        if np.any(np.abs(pos - requested_pos) > 1e-6):
+            now = time.monotonic()
+            if now - self._last_clip_log_time >= 2.0:
+                logger.warning(
+                    "EE target clipped: requested=%s mm, bounded=%s mm, bounds=%s..%s mm",
+                    np.round(requested_pos * 1000, 2).tolist(),
+                    np.round(pos * 1000, 2).tolist(),
+                    np.round(np.asarray(self.end_effector_bounds["min"]) * 1000, 2).tolist(),
+                    np.round(np.asarray(self.end_effector_bounds["max"]) * 1000, 2).tolist(),
+                )
+                self._last_clip_log_time = now
 
         # Check for jumps in position
         if self._last_pos is not None:
@@ -569,6 +583,9 @@ class InverseKinematicsRLStep(ProcessorStep):
     motor_names: list[str]
     q_curr: np.ndarray | None = field(default=None, init=False, repr=False)
     initial_guess_current_joints: bool = True
+    # Keep the gripper orientation stable instead of allowing distant targets
+    # to rotate the jaws downward into the table.
+    orientation_weight: float = 0.01
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         new_transition = transition.copy()
@@ -615,7 +632,11 @@ class InverseKinematicsRLStep(ProcessorStep):
         t_des[:3, 3] = [x, y, z]
 
         # Compute inverse kinematics
-        q_target = self.kinematics.inverse_kinematics(self.q_curr, t_des)
+        q_target = self.kinematics.inverse_kinematics(
+            self.q_curr,
+            t_des,
+            orientation_weight=self.orientation_weight,
+        )
         self.q_curr = q_target
 
         # TODO: This is sentitive to order of motor_names = q_target mapping

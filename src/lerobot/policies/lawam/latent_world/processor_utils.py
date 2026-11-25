@@ -19,7 +19,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import _transformers_available, require_package
 
 if TYPE_CHECKING or _transformers_available:
@@ -67,8 +66,7 @@ def load_latent_world_processor(
 ) -> tuple[Any, Any, int]:
     """Load and configure the Qwen processor described by a portable spec."""
     require_package("transformers", extra="lawam")
-    repo_id, revision = split_hub_reference(spec.model_id)
-    processor = AutoProcessor.from_pretrained(repo_id, revision=revision, code_revision=revision)
+    processor = AutoProcessor.from_pretrained(spec.model_id)
     return configure_latent_world_processor(
         processor,
         placeholder_token=spec.placeholder_token,

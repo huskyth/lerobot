@@ -1,0 +1,114 @@
+{
+  "env": {
+    "name": "real_robot",
+    "fps": 10,
+    "task": "Push the green cube into the goal region.",
+    "robot": {
+      "type": "so101_follower",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79015851-if00",
+      "id": "follower_arm",
+      "use_degrees": true,
+      "max_relative_target": null,
+      "cameras": {
+        "top": {
+          "type": "opencv",
+          "index_or_path": "/dev/v4l/by-id/usb-2MP_USB_Camera_2MP_USB_Camera_04434000_P120800_SN0002-video-index0",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG",
+          "warmup_s": 3
+        },
+        "wrist": {
+          "type": "opencv",
+          "index_or_path": "/dev/v4l/by-id/usb-JoyandAI_JYU2C-2083_JYU2C-2083-2609096-video-index0",
+          "width": 640,
+          "height": 480,
+          "fps": 30,
+          "fourcc": "MJPG",
+          "warmup_s": 3
+        }
+      }
+    },
+    "teleop": {
+      "type": "so101_leader",
+      "port": "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E116379-if00",
+      "id": "leader_arm",
+      "use_degrees": true,
+      "leader_follower_mode": true
+    },
+    "processor": {
+      "control_mode": "leader",
+      "max_gripper_pos": 100.0,
+      "observation": {
+        "display_cameras": false,
+        "add_joint_velocity_to_observation": false,
+        "add_current_to_observation": false,
+        "add_ee_pose_to_observation": false
+      },
+      "image_preprocessing": {
+        "crop_params_dict": {},
+        "resize_size": [
+          128,
+          128
+        ]
+      },
+      "gripper": {
+        "use_gripper": true,
+        "gripper_penalty": 0.0,
+        "lock_gripper": true
+      },
+      "reset": {
+        "fixed_reset_joint_positions": [
+          -1.099002,
+          -95.947376,
+          87.729507,
+          76.172869,
+          -9.978002,
+          3.665
+        ],
+        "reset_time_s": 5.0,
+        "pre_record_delay_s": 5.0,
+        "control_time_s": 60.0,
+        "terminate_on_success": true
+      },
+      "inverse_kinematics": {
+        "urdf_path": "/home/husky/Desktop/lerobot/rl/assets/so101/so101_new_calib.urdf",
+        "target_frame_name": "gripper_frame_link",
+        "orientation_weight": 0.03,
+        "end_effector_bounds": {
+          "min": [
+            0.13967203387855132,
+            -0.03015,
+            0.006717841916109839
+          ],
+          "max": [
+            0.3265,
+            0.08321,
+            0.043
+          ]
+        },
+        "end_effector_step_sizes": {
+          "x": 0.002,
+          "y": 0.002,
+          "z": 0.003
+        }
+      },
+      "reward_classifier": {
+        "pretrained_path": null,
+        "success_threshold": 0.5,
+        "success_reward": 1.0
+      }
+    }
+  },
+  "dataset": {
+    "repo_id": "local/so101_push_cube_hardcube15_20261112",
+    "root": "/home/husky/Desktop/lerobot/data/so101_push_cube_hardcube15_20261112",
+    "task": "Push the green cube into the goal region.",
+    "num_episodes_to_record": 15,
+    "replay_episode": null,
+    "push_to_hub": false
+  },
+  "mode": "record",
+  "device": "cuda"
+}

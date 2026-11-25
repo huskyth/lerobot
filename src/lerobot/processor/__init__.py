@@ -69,8 +69,7 @@ from .hil_processor import (
     TimeLimitProcessorStep,
 )
 from .image_augmentation_processor import ImageAugmentationProcessorStep
-from .joint_affine_processor import JointAffineProcessorStep
-from .joint_reorder_processor import JointReorderProcessorStep
+from .leader_follower_processor import LeaderFollowerProcessor
 from .newline_task_processor import NewLineTaskProcessorStep
 from .normalize_processor import NormalizerProcessorStep, UnnormalizerProcessorStep, hotswap_stats
 from .observation_processor import VanillaObservationProcessorStep
@@ -103,7 +102,7 @@ from .relative_action_processor import (
     to_absolute_actions,
     to_relative_actions,
 )
-from .rename_processor import RenameObservationsProcessorStep, rename_keys, rename_stats
+from .rename_processor import RenameObservationsProcessorStep, rename_stats
 from .render_messages_processor import RenderRuntimeMessagesStep, RenderTrainingMessagesStep
 from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
 
@@ -137,8 +136,7 @@ __all__ = [
     "ImageCropResizeProcessorStep",
     "InfoProcessorStep",
     "InterventionActionProcessorStep",
-    "JointAffineProcessorStep",
-    "JointReorderProcessorStep",
+    "LeaderFollowerProcessor",
     "DefaultPolicyProcessorSteps",
     "load_pretrained_policy_processors",
     "make_default_policy_processor_steps",
@@ -166,7 +164,6 @@ __all__ = [
     "RobotAction",
     "RobotActionProcessorStep",
     "RobotObservation",
-    "rename_keys",
     "rename_stats",
     "RenameObservationsProcessorStep",
     "RenderRuntimeMessagesStep",

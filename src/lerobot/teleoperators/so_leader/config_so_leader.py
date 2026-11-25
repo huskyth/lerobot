@@ -29,6 +29,9 @@ class SOLeaderConfig:
     # Whether to use degrees for angles
     use_degrees: bool = True
 
+    # Enable leader-follower mode where leader can both lead and follow
+    leader_follower_mode: bool = False
+
     # Number of extra attempts when a `sync_read` of the motors fails. Feetech buses can occasionally
     # return a corrupted status packet ("Incorrect status packet!"), especially when several joints move
     # at once, which otherwise aborts the teleoperation loop. Retries are immediate (no sleep) and only

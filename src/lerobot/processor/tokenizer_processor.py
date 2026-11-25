@@ -41,7 +41,6 @@ from lerobot.utils.constants import (
     OBS_LANGUAGE_SUBTASK_TOKENS,
     OBS_LANGUAGE_TOKENS,
 )
-from lerobot.utils.hub import split_hub_reference
 from lerobot.utils.import_utils import _transformers_available
 
 from .pipeline import ActionProcessorStep, ObservationProcessorStep, ProcessorStepRegistry
@@ -111,10 +110,7 @@ class TokenizerProcessorStep(ObservationProcessorStep):
         elif self.tokenizer_name is not None:
             if AutoTokenizer is None:
                 raise ImportError("AutoTokenizer is not available")
-            repo_id, revision = split_hub_reference(self.tokenizer_name)
-            self.input_tokenizer = AutoTokenizer.from_pretrained(
-                repo_id, revision=revision, code_revision=revision
-            )
+            self.input_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
         else:
             raise ValueError(
                 "Either 'tokenizer' or 'tokenizer_name' must be provided. "
@@ -360,7 +356,7 @@ class ActionTokenizerProcessorStep(ActionProcessorStep):
 
     action_tokenizer_name: str | None = None
     action_tokenizer_input_object: Any | None = None
-    trust_remote_code: bool = False
+    trust_remote_code: bool = True
     max_action_tokens: int = 256
     fast_skip_tokens: int = 128
     paligemma_tokenizer_name: str = "google/paligemma-3b-pt-224"
@@ -392,9 +388,8 @@ class ActionTokenizerProcessorStep(ActionProcessorStep):
         elif self.action_tokenizer_name is not None:
             if AutoProcessor is None:
                 raise ImportError("AutoProcessor is not available")
-            repo_id, revision = split_hub_reference(self.action_tokenizer_name)
             self.action_tokenizer = AutoProcessor.from_pretrained(
-                repo_id, trust_remote_code=self.trust_remote_code, revision=revision, code_revision=revision
+                self.action_tokenizer_name, trust_remote_code=self.trust_remote_code
             )
         else:
             raise ValueError(
@@ -402,14 +397,11 @@ class ActionTokenizerProcessorStep(ActionProcessorStep):
                 "Pass a tokenizer object directly or a tokenizer name to auto-load."
             )
 
-        repo_id, revision = split_hub_reference(self.paligemma_tokenizer_name)
         self._paligemma_tokenizer = AutoTokenizer.from_pretrained(
-            repo_id,
+            self.paligemma_tokenizer_name,
             trust_remote_code=self.trust_remote_code,
             add_eos_token=True,
             add_bos_token=False,
-            revision=revision,
-            code_revision=revision,
         )
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
@@ -587,6 +579,7 @@ class ActionTokenizerProcessorStep(ActionProcessorStep):
             A dictionary with the processor's configuration parameters.
         """
         config = {
+            "trust_remote_code": self.trust_remote_code,
             "max_action_tokens": self.max_action_tokens,
             "fast_skip_tokens": self.fast_skip_tokens,
             "paligemma_tokenizer_name": self.paligemma_tokenizer_name,

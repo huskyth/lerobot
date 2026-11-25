@@ -27,14 +27,12 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from queue import Empty, Full, Queue
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lerobot.utils.import_utils import _zenoh_available, require_package
 
 if TYPE_CHECKING or _zenoh_available:
     import zenoh
-
-T = TypeVar("T")
 
 
 class TransportError(RuntimeError):
@@ -105,9 +103,7 @@ def _payload(value: bytes, maximum: int) -> None:
         raise TransportError("Payload is not bytes or exceeds transport limit")
 
 
-# Keep this syntax compatible with Python 3.11 for env servers running inside pinned simulator environments.
-# This does not change the full LeRobot package's Python requirement.
-class BoundedSubscriber(Generic[T]):  # noqa: UP046
+class BoundedSubscriber[T]:
     """Bounded callback-to-consumer FIFO; full queues drop incoming values.
 
     Consumers must inspect ``dropped`` and ``oversized``. The transport owns declared

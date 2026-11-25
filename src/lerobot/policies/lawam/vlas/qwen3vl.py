@@ -22,8 +22,6 @@ import torch
 import torch.nn as nn
 from transformers import AutoConfig, AutoProcessor, Qwen3VLForConditionalGeneration
 
-from lerobot.utils.hub import split_hub_reference
-
 logger = logging.getLogger(__name__)
 
 
@@ -31,15 +29,14 @@ def load_qwen3vl(
     model_id: str,
     dtype: torch.dtype = torch.bfloat16,
 ) -> tuple[nn.Module, AutoProcessor]:
-    repo_id, revision = split_hub_reference(model_id)
-    config = AutoConfig.from_pretrained(repo_id, revision=revision, code_revision=revision)
+    config = AutoConfig.from_pretrained(model_id)
     if config.model_type != "qwen3_vl":
         raise ValueError(
             "The LeRobot LaWAM adapter supports Qwen3-VL backbones only; "
             f"got model_type={config.model_type!r} for {model_id!r}."
         )
 
-    processor = AutoProcessor.from_pretrained(repo_id, revision=revision, code_revision=revision)
+    processor = AutoProcessor.from_pretrained(model_id)
     if processor.chat_template is None and getattr(
         getattr(processor, "tokenizer", None), "chat_template", None
     ):
@@ -53,7 +50,9 @@ def load_qwen3vl(
         variant = {"attn_implementation": attention_backend} if attention_backend is not None else {}
         try:
             model = Qwen3VLForConditionalGeneration.from_pretrained(
-                repo_id, revision=revision, **base_kwargs, **variant
+                model_id,
+                **base_kwargs,
+                **variant,
             )
             logger.info(
                 "Loaded Qwen3-VL %s with attention backend %s.",

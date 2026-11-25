@@ -39,6 +39,7 @@ from lerobot.processor import (
     GymHILAdapterProcessorStep,
     ImageCropResizeProcessorStep,
     InterventionActionProcessorStep,
+    LeaderFollowerProcessor,
     MapDeltaActionToRobotActionStep,
     MapTensorToDeltaActionDictStep,
     Numpy2TorchActionProcessorStep,
@@ -71,6 +72,7 @@ from lerobot.teleoperators import (
     make_teleoperator_from_config,
     so_leader,  # noqa: F401
 )
+from lerobot.teleoperators.so_leader.so_leader_follower import SO101LeaderFollower
 from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.constants import ACTION, DONE, OBS_IMAGES, OBS_STATE, REWARD
@@ -130,6 +132,8 @@ class RobotEnv(gym.Env):
         display_cameras: bool = False,
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
+        pre_record_delay_s: float = 0.0,
+        play_sounds: bool = True,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -139,6 +143,7 @@ class RobotEnv(gym.Env):
             display_cameras: Whether to show camera feeds during execution.
             reset_pose: Joint positions for environment reset.
             reset_time_s: Time to wait during reset.
+            pre_record_delay_s: Time to wait after reset so the operator can place objects and leave the camera view.
         """
         super().__init__()
 
@@ -158,6 +163,8 @@ class RobotEnv(gym.Env):
 
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
+        self.pre_record_delay_s = pre_record_delay_s
+        self.play_sounds = play_sounds
 
         self.use_gripper = use_gripper
 
@@ -237,11 +244,35 @@ class RobotEnv(gym.Env):
         # self.robot.reset()
         start_time = time.perf_counter()
         if self.reset_pose is not None:
-            log_say("Reset the environment.", play_sounds=True)
+            print(
+                "[复位] 从臂即将移动到初始姿态。请移开方块，并保持机械臂周围清空。",
+                flush=True,
+            )
+            log_say("Reset the environment.", play_sounds=self.play_sounds)
             reset_follower_position(self.robot, np.array(self.reset_pose))
-            log_say("Reset the environment done.", play_sounds=True)
+            log_say("Reset the environment done.", play_sounds=self.play_sounds)
 
         precise_sleep(max(self.reset_time_s - (time.perf_counter() - start_time), 0.0))
+
+        if self.reset_pose is not None:
+            print(
+                "[就绪] 从臂已到达初始姿态并保持稳定。可以把方块放回起点；"
+                "放好后不要再碰从臂。",
+                flush=True,
+            )
+
+        if self.pre_record_delay_s > 0:
+            remaining_s = int(np.ceil(self.pre_record_delay_s))
+            print(
+                f"[准备] 现在放好方块并把手移出相机视野，"
+                f"倒计时结束后才开始录制（{remaining_s} 秒）。",
+                flush=True,
+            )
+            while remaining_s > 0:
+                print(f"[倒计时] {remaining_s} 秒", flush=True)
+                precise_sleep(1.0)
+                remaining_s -= 1
+            print("[开始] 准备时间结束，请确认手已离开相机视野；即将开始录制。", flush=True)
 
         super().reset(seed=seed, options=options)
 
@@ -301,7 +332,11 @@ class RobotEnv(gym.Env):
         return self._raw_joint_positions
 
 
-def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
+def make_robot_env(
+    cfg: HILSerlRobotEnvConfig,
+    *,
+    play_sounds: bool = True,
+) -> tuple[gym.Env, Any]:
     """Create robot environment from configuration.
 
     Args:
@@ -344,12 +379,19 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         cfg.processor.observation.display_cameras if cfg.processor.observation is not None else False
     )
     reset_pose = cfg.processor.reset.fixed_reset_joint_positions if cfg.processor.reset is not None else None
+    reset_time_s = cfg.processor.reset.reset_time_s if cfg.processor.reset is not None else 5.0
+    pre_record_delay_s = (
+        cfg.processor.reset.pre_record_delay_s if cfg.processor.reset is not None else 0.0
+    )
 
     env = RobotEnv(
         robot=robot,
         use_gripper=use_gripper,
         display_cameras=display_cameras,
         reset_pose=reset_pose,
+        reset_time_s=reset_time_s,
+        pre_record_delay_s=pre_record_delay_s,
+        play_sounds=play_sounds,
     )
 
     return env, teleop_device
@@ -476,7 +518,6 @@ def make_processors(
                 device=device,
                 success_threshold=cfg.processor.reward_classifier.success_threshold,
                 success_reward=cfg.processor.reward_classifier.success_reward,
-                trust_remote_code=cfg.processor.reward_classifier.trust_remote_code,
                 terminate_on_success=terminate_on_success,
             )
         )
@@ -487,11 +528,40 @@ def make_processors(
     action_pipeline_steps = [
         AddTeleopActionAsComplimentaryDataStep(teleop_device=teleop_device),
         AddTeleopEventsAsInfoStep(teleop_device=teleop_device),
+    ]
+    if cfg.processor.control_mode == "leader":
+        if cfg.processor.inverse_kinematics is None or kinematics_solver is None:
+            raise ValueError("Leader control mode requires inverse_kinematics configuration.")
+        if not isinstance(teleop_device, SO101LeaderFollower):
+            raise ValueError("Leader control mode requires SO101LeaderFollower teleop device.")
+
+        action_pipeline_steps.append(
+            LeaderFollowerProcessor(
+                leader_device=teleop_device,
+                motor_names=motor_names,
+                robot=env.robot,
+                kinematics=kinematics_solver,
+                end_effector_step_sizes=np.array(
+                    list(cfg.processor.inverse_kinematics.end_effector_step_sizes.values())
+                ),
+                use_gripper=cfg.processor.gripper.use_gripper
+                if cfg.processor.gripper is not None
+                else False,
+                lock_gripper=cfg.processor.gripper.lock_gripper
+                if cfg.processor.gripper is not None
+                else False,
+                max_gripper_pos=cfg.processor.max_gripper_pos
+                if cfg.processor.max_gripper_pos is not None
+                else 100.0,
+            )
+        )
+
+    action_pipeline_steps.append(
         InterventionActionProcessorStep(
             use_gripper=cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else False,
             terminate_on_success=terminate_on_success,
-        ),
-    ]
+        )
+    )
 
     # Replace InverseKinematicsProcessor with new kinematic processors
     if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
@@ -517,7 +587,10 @@ def make_processors(
                 discrete_gripper=True,
             ),
             InverseKinematicsRLStep(
-                kinematics=kinematics_solver, motor_names=motor_names, initial_guess_current_joints=False
+                kinematics=kinematics_solver,
+                motor_names=motor_names,
+                initial_guess_current_joints=False,
+                orientation_weight=cfg.processor.inverse_kinematics.orientation_weight,
             ),
         ]
         action_pipeline_steps.extend(inverse_kinematics_steps)
@@ -630,11 +703,10 @@ def control_loop(
     """
     dt = 1.0 / cfg.env.fps
 
-    print(f"Starting control loop at {cfg.env.fps} FPS")
-    print("Controls:")
-    print("- Use gamepad/teleop device for intervention")
-    print("- When not intervening, robot will stay still")
-    print("- Press Ctrl+C to exit")
+    print(f"[启动] 控制频率={cfg.env.fps} FPS", flush=True)
+    print("[操作] 先等待终端出现“[就绪]”，再把方块放回起点。", flush=True)
+    print("[操作] 按一次 Space 进入主臂接管；再按一次 Space 返回跟随模式。", flush=True)
+    print("[操作] 成功时按 s；失败时按 ESC；需要重录时按 r；Ctrl+C 退出。", flush=True)
 
     transition = reset_and_build_transition(env, env_processor, action_processor)
 
@@ -687,10 +759,33 @@ def control_loop(
             image_writer_processes=0,
             features=features,
         )
+        print(
+            f"[采集] 计划录制 {cfg.dataset.num_episodes_to_record} 回合，"
+            f"数据目录={cfg.dataset.root}",
+            flush=True,
+        )
 
     episode_idx = 0
     episode_step = 0
     episode_start_time = time.perf_counter()
+
+    def announce_episode_start(index: int) -> None:
+        mode = "主臂接管中" if getattr(teleop_device, "is_intervening", False) else "跟随中"
+        print(
+            f"[采集] 第 {index + 1}/{cfg.dataset.num_episodes_to_record} 回合开始；"
+            f"当前模式={mode}。",
+            flush=True,
+        )
+        if mode == "跟随中":
+            print(
+                "[操作] 现在按一次 Space，看到“[模式] 已进入主臂接管”后再扳动主臂。",
+                flush=True,
+            )
+        else:
+            print("[操作] 当前已经在主臂接管中，可以直接扳动主臂。", flush=True)
+
+    if episode_idx < cfg.dataset.num_episodes_to_record:
+        announce_episode_start(episode_idx)
 
     try:
         while episode_idx < cfg.dataset.num_episodes_to_record:
@@ -744,23 +839,41 @@ def control_loop(
             # Handle episode termination
             if terminated or truncated:
                 episode_time = time.perf_counter() - episode_start_time
-                logging.info(
-                    f"Episode ended after {episode_step} steps in {episode_time:.1f}s with reward {transition[TransitionKey.REWARD]}"
+                info = transition[TransitionKey.INFO]
+                success = bool(info.get(TeleopEvents.SUCCESS, False))
+                rerecord_episode = bool(info.get(TeleopEvents.RERECORD_EPISODE, False))
+                if success:
+                    result = "成功"
+                elif rerecord_episode:
+                    result = "请求重录"
+                elif truncated:
+                    result = "超时失败"
+                else:
+                    result = "失败"
+                print(
+                    f"[回合] 第 {episode_idx + 1} 回合结束：{result}；"
+                    f"时长={episode_time:.1f} 秒，帧数={episode_step}。",
+                    flush=True,
                 )
                 episode_step = 0
                 episode_idx += 1
 
                 if dataset is not None:
-                    if transition[TransitionKey.INFO].get(TeleopEvents.RERECORD_EPISODE, False):
-                        logging.info(f"Re-recording episode {episode_idx}")
+                    if rerecord_episode:
+                        print("[保存] 本回合数据将丢弃，准备重新录制。", flush=True)
                         dataset.clear_episode_buffer()
                         episode_idx -= 1
                     else:
-                        logging.info(f"Saving episode {episode_idx}")
+                        print(f"[保存] 正在保存第 {episode_idx} 回合数据。", flush=True)
                         dataset.save_episode()
+                        print(f"[保存] 第 {episode_idx} 回合数据已保存。", flush=True)
 
                 # Reset for new episode
+                print("[复位] 请暂时不要放方块，等待从臂回到初始姿态。", flush=True)
                 transition = reset_and_build_transition(env, env_processor, action_processor)
+                episode_start_time = time.perf_counter()
+                if episode_idx < cfg.dataset.num_episodes_to_record:
+                    announce_episode_start(episode_idx)
 
             # Maintain fps timing
             precise_sleep(max(dt - (time.perf_counter() - step_start_time), 0.0))
@@ -768,6 +881,9 @@ def control_loop(
         if dataset is not None and dataset.writer is not None and dataset.writer.image_writer is not None:
             logging.info("Waiting for image writer to finish...")
             dataset.writer.image_writer.stop()
+
+    if dataset is not None:
+        print(f"[完成] 采集结束，数据目录={cfg.dataset.root}", flush=True)
 
     if dataset is not None and cfg.dataset.push_to_hub:
         logging.info("Finalizing dataset before pushing to hub")

@@ -89,6 +89,7 @@ from lerobot.policies import make_policy, make_pre_post_processors
 from lerobot.processor import TransitionKey, policy_output_to_transition, transition_to_policy_action
 from lerobot.robots import so_follower  # noqa: F401
 from lerobot.teleoperators import gamepad, so_leader  # noqa: F401
+from lerobot.teleoperators.so_leader.so_leader_follower import SO101LeaderFollower
 from lerobot.teleoperators.utils import TeleopEvents
 from lerobot.utils.device_utils import get_safe_torch_device
 from lerobot.utils.process import ProcessSignalHandler, ensure_multiprocessing_start_method
@@ -257,7 +258,9 @@ def act_with_policy(
 
     logging.info("make_env online")
 
-    online_env, teleop_device = make_robot_env(cfg=cfg.env)
+    # Speech playback uses subprocess.Popen. Forking while the gRPC receiver
+    # threads are active can corrupt gRPC's HTTP/2 transport and abort the actor.
+    online_env, teleop_device = make_robot_env(cfg=cfg.env, play_sounds=False)
     env_processor, action_processor = make_processors(online_env, teleop_device, cfg.env, cfg.policy.device)
 
     set_seed(cfg.seed)
@@ -299,6 +302,17 @@ def act_with_policy(
     episode_total_steps = 0
 
     policy_timer = TimerManager("Policy inference", log=False)
+    gripper_config = cfg.env.processor.gripper
+    lock_gripper = (
+        gripper_config is not None
+        and gripper_config.lock_gripper
+        and cfg.policy.num_discrete_actions is not None
+    )
+    if lock_gripper:
+        print(
+            "[ACTOR] 夹爪已锁定：策略和主臂接管都输出 gripper=1（保持当前位置）。",
+            flush=True,
+        )
 
     for interaction_step in range(cfg.policy.online_steps):
         start_time = time.perf_counter()
@@ -325,6 +339,9 @@ def act_with_policy(
                 action = torch.cat([continuous_action, discrete_action], dim=-1)
             else:
                 action = postprocessor.process_action(action)
+            if lock_gripper:
+                action = action.clone()
+                action[..., -1] = 1.0
         policy_fps = policy_timer.fps_last
 
         log_policy_frequency_issue(policy_fps=policy_fps, cfg=cfg, interaction_step=interaction_step)
@@ -424,7 +441,14 @@ def act_with_policy(
             episode_intervention_steps = 0
             episode_total_steps = 0
 
-            transition = reset_and_build_transition(online_env, env_processor, action_processor)
+            leader_manual_reset = isinstance(teleop_device, SO101LeaderFollower)
+            if leader_manual_reset:
+                teleop_device.release_for_episode_reset()
+            try:
+                transition = reset_and_build_transition(online_env, env_processor, action_processor)
+            finally:
+                if leader_manual_reset:
+                    teleop_device.resume_after_episode_reset()
 
         if cfg.env.fps is not None:
             dt_time = time.perf_counter() - start_time
@@ -716,6 +740,14 @@ def update_policy_parameters(algorithm: RLAlgorithm, parameters_queue: Queue, de
         # - Skip encoder params entirely when freeze_vision_encoder=True
         # - Ensure discrete_critic gets correct encoder state (currently uses encoder_critic)
         algorithm.load_weights(state_dicts, device=device)
+        print(
+            "\n"
+            "============================================================\n"
+            f"[ACTOR 模型已更新] {time.strftime('%H:%M:%S')} "
+            "收到 Learner 最新策略参数，下一回合将使用新模型\n"
+            "============================================================",
+            flush=True,
+        )
 
 
 #  Utilities functions

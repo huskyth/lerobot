@@ -16,7 +16,7 @@
 
 import functools
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import suppress
 from typing import NotRequired, TypedDict
 
@@ -457,11 +457,14 @@ class ReplayBuffer:
         )
 
         # Convert dataset to transitions
-        list_transition = cls._lerobotdataset_to_transitions(dataset=lerobot_dataset, state_keys=state_keys)
+        transitions = cls._lerobotdataset_to_transitions(
+            dataset=lerobot_dataset,
+            state_keys=state_keys,
+        )
 
         # Initialize the buffer with the first transition to set up storage tensors
-        if list_transition:
-            first_transition = list_transition[0]
+        first_transition = next(transitions, None)
+        if first_transition is not None:
             first_state = {k: v.to(device) for k, v in first_transition["state"].items()}
             first_action = first_transition[ACTION].to(device)
 
@@ -478,9 +481,20 @@ class ReplayBuffer:
             replay_buffer._initialize_storage(
                 state=first_state, action=first_action, complementary_info=first_complementary_info
             )
+            replay_buffer.add(
+                state=first_transition["state"],
+                action=first_transition[ACTION],
+                reward=first_transition["reward"],
+                next_state=first_transition["next_state"],
+                done=first_transition["done"],
+                truncated=False,
+                complementary_info=first_transition.get("complementary_info", None),
+            )
 
-        # Fill the buffer with all transitions
-        for data in list_transition:
+        # Stream the remaining transitions. Building a list here retained a second
+        # full copy of all image transitions and caused systemd-oomd to kill training
+        # while restoring a capacity-sized replay buffer.
+        for data in transitions:
             for k, v in data.items():
                 if isinstance(v, dict):
                     for key, tensor in v.items():
@@ -570,7 +584,15 @@ class ReplayBuffer:
 
             # Fill the data for state keys
             for key in self.states:
-                frame_dict[key] = self.states[key][actual_idx].cpu()
+                value = self.states[key][actual_idx].cpu()
+                if key.startswith(OBS_IMAGE) and value.dtype != torch.uint8:
+                    # Online observations can be float[0, 1], while replay buffers restored
+                    # from some video datasets can contain float[0, 255]. The PNG writer
+                    # accepts uint8 for both representations.
+                    if value.numel() > 0 and value.min() >= 0 and value.max() <= 1:
+                        value = value * 255
+                    value = value.nan_to_num(0, 255).clamp(0, 255).round().to(torch.uint8)
+                frame_dict[key] = value
 
             # Fill action, reward, done
             frame_dict[ACTION] = self.actions[actual_idx].cpu()
@@ -611,9 +633,9 @@ class ReplayBuffer:
     def _lerobotdataset_to_transitions(
         dataset: LeRobotDataset,
         state_keys: Sequence[str] | None = None,
-    ) -> list[Transition]:
+    ) -> Iterator[Transition]:
         """
-        Convert a LeRobotDataset into a list of RL (s, a, r, s', done) transitions.
+        Convert a LeRobotDataset into an iterator of RL (s, a, r, s', done) transitions.
 
         Args:
             dataset (LeRobotDataset):
@@ -634,13 +656,11 @@ class ReplayBuffer:
                 If None, you must handle or define default keys.
 
         Returns:
-            transitions (list[Transition]):
-                A list of Transition dictionaries with the same length as `dataset`.
+            transitions: An iterator over RL transitions.
         """
         if state_keys is None:
             raise ValueError("State keys must be provided when converting LeRobotDataset to Transitions.")
 
-        transitions = []
         num_frames = len(dataset)
 
         # Check if the dataset has "next.done" key
@@ -655,8 +675,9 @@ class ReplayBuffer:
         if not has_done_key:
             print("'next.done' key not found in dataset. Inferring from episode boundaries...")
 
+        current_sample = dataset[0]
         for i in tqdm(range(num_frames)):
-            current_sample = dataset[i]
+            next_sample = dataset[i + 1] if i < num_frames - 1 else None
 
             # ----- 1) Current state -----
             current_state: dict[str, torch.Tensor] = {}
@@ -678,8 +699,7 @@ class ReplayBuffer:
                 done = False
                 if i == num_frames - 1:
                     done = True
-                elif i < num_frames - 1:
-                    next_sample = dataset[i + 1]
+                elif next_sample is not None:
                     if next_sample["episode_index"] != current_sample["episode_index"]:
                         done = True
 
@@ -690,8 +710,7 @@ class ReplayBuffer:
             # If not done and the next sample is in the same episode, we pull the next sample's state.
             # Otherwise (done=True or next sample crosses to a new episode), next_state = current_state.
             next_state = current_state  # default
-            if not done and (i < num_frames - 1):
-                next_sample = dataset[i + 1]
+            if not done and next_sample is not None:
                 if next_sample["episode_index"] == current_sample["episode_index"]:
                     # Build next_state from the same keys
                     next_state_data: dict[str, torch.Tensor] = {}
@@ -726,9 +745,9 @@ class ReplayBuffer:
                 truncated=truncated,
                 complementary_info=complementary_info,
             )
-            transitions.append(transition)
-
-        return transitions
+            yield transition
+            if next_sample is not None:
+                current_sample = next_sample
 
 
 # Utility function to guess shapes/dtypes from a tensor

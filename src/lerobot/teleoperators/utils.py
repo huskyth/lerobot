@@ -35,6 +35,13 @@ class TeleopEvents(Enum):
 
 def make_teleoperator_from_config(config: TeleoperatorConfig) -> "Teleoperator":
     # TODO(Steven): Consider just using the make_device_from_device_class for all types
+    # v0.7.0 shares SOLeaderTeleopConfig between so100_leader and so101_leader.
+    # Dispatch this official SO-101 mode before the aliased type branches.
+    if getattr(config, "leader_follower_mode", False):
+        from .so_leader import SO101LeaderFollower
+
+        return SO101LeaderFollower(config)
+
     if config.type == "keyboard":
         from .keyboard import KeyboardTeleop
 
